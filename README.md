@@ -20,7 +20,15 @@ A hands-on lab for building and exercising detection and response capabilities i
 | --- | --- | --- |
 | 1 | [Environment Setup](docs/phase-1-environment-setup.md) | Complete |
 | 2 | [Cost Guardrails](docs/phase-2-cost-guardrails.md) | Complete |
-| 3 | Logging and Detection — CloudTrail, GuardDuty | Planned |
+| 3 | [Base AWS Environment](docs/phase-3-base-environment.md) | Complete |
+| 4 | GuardDuty and detection engineering | Planned |
+
+## Terraform layout
+
+| Directory | Lifecycle |
+| --- | --- |
+| [terraform/budget/](terraform/budget/) | Long-lived. Cost guardrails — leave running. |
+| [terraform/environment/](terraform/environment/) | Ephemeral. **Run `terraform destroy` between sessions** — roughly $8/month if left up. |
 
 ## Prerequisites
 
