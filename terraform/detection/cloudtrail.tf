@@ -18,6 +18,48 @@ resource "aws_cloudtrail" "lab" {
   enable_log_file_validation    = true
   enable_logging                = true
 
+  # Management events - the free copy. Always on.
+  advanced_event_selector {
+    name = "Management events"
+
+    field_selector {
+      field  = "eventCategory"
+      equals = ["Management"]
+    }
+  }
+
+  # S3 object-level (data) events, scoped by ARN prefix.
+  #
+  # Phase 5 needs these: S3 GetObject and ListObjects are data events, not
+  # management events, so without this an investigation into who read what
+  # from a bucket finds nothing. "You cannot investigate what you did not log."
+  #
+  # Scoped deliberately. Data events bill per event, and enabling them
+  # account-wide is the classic source of a runaway CloudTrail bill. This
+  # matches only lab incident buckets.
+  dynamic "advanced_event_selector" {
+    for_each = length(var.s3_data_event_arn_prefixes) > 0 ? [1] : []
+
+    content {
+      name = "S3 data events for lab incident buckets"
+
+      field_selector {
+        field  = "eventCategory"
+        equals = ["Data"]
+      }
+
+      field_selector {
+        field  = "resources.type"
+        equals = ["AWS::S3::Object"]
+      }
+
+      field_selector {
+        field       = "resources.ARN"
+        starts_with = var.s3_data_event_arn_prefixes
+      }
+    }
+  }
+
   tags = {
     Name = "${var.project_name}-trail"
   }
