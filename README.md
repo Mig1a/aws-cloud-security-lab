@@ -12,6 +12,13 @@ A hands-on lab for building and exercising detection and response capabilities i
 | `incidents/` | Incident write-ups and investigation notes |
 | `diagrams/` | Architecture and data-flow diagrams |
 | `screenshots/` | Console evidence captured during exercises |
+| `docs/` | Phase-by-phase build documentation |
+
+## Documentation
+
+| Phase | Document | Status |
+| --- | --- | --- |
+| 1 | [Environment Setup](docs/phase-1-environment-setup.md) | Complete |
 
 ## Prerequisites
 
