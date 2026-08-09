@@ -1,0 +1,10 @@
+# Copy to terraform.tfvars and edit. terraform.tfvars is gitignored so your
+# address is never committed.
+
+alert_email = "you@example.com"
+
+# Optional - defaults shown.
+# aws_region           = "us-east-1"
+# monthly_budget_usd   = 10
+# alert_thresholds_usd = [5, 8, 10]
+# enable_forecast_alert = true
