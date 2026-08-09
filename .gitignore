@@ -12,7 +12,8 @@ override.tf.json
 *_override.tf.json
 .terraformrc
 terraform.rc
-.terraform.lock.hcl
+# NOTE: .terraform.lock.hcl is intentionally NOT ignored - commit it so
+# provider versions stay reproducible across machines.
 
 # Credentials / secrets
 *.pem
