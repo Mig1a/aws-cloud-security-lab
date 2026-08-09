@@ -173,13 +173,13 @@ Cosmetic only; can be squashed.
 
 ## 7. Outstanding items
 
-| Item | Why it matters |
-| --- | --- |
-| **Free up disk space** | ~1.2 GB free. The AWS provider is re-downloaded per project by default; the next `terraform init` may fail again. |
-| **Set `TF_PLUGIN_CACHE_DIR`** | Makes Terraform download each provider once and share it across projects — directly mitigates the disk problem. |
-| **Confirm MFA on root user** | Instructed but not independently verified. A root account with only a password is a single credential leak from account takeover. |
-| **Create a zero-spend budget alert** | Instructed but not independently verified. GuardDuty, Security Hub, and Config bill continuously once enabled. |
-| **Move repo out of OneDrive** | OneDrive sync can conflict with git internals, and `screenshots/` will sync-upload evidence images. |
+| Item | Status | Why it matters |
+| --- | --- | --- |
+| **Free up disk space** | Resolved in [Phase 2](phase-2-cost-guardrails.md) | Dropped to 0.2 GB during Phase 2's `terraform init`; clearing caches recovered ~5.2 GB. |
+| **Set `TF_PLUGIN_CACHE_DIR`** | Open | Makes Terraform download each provider once and share it across projects — the structural fix for the disk problem. |
+| **Confirm MFA on root user** | Open | Instructed but not independently verified. A root account with only a password is a single credential leak from account takeover. |
+| **Cost alerting** | Done in [Phase 2](phase-2-cost-guardrails.md) | $10 monthly budget with alerts at $5/$8/$10 plus a forecast alert. |
+| **Move repo out of OneDrive** | Open | OneDrive sync can conflict with git internals, and `screenshots/` will sync-upload evidence images. |
 
 ---
 
@@ -201,7 +201,7 @@ running `terraform destroy` at the end of each working session.
 
 ## Next phase
 
-Phase 2 — write the first real Terraform configuration in `terraform/`:
-a zero-spend budget alert and billing alarm. Chosen deliberately as the first
-build because it costs nothing to run and provides a guardrail before any
-billable security service is enabled.
+[Phase 2 — Cost Guardrails](phase-2-cost-guardrails.md): the first real
+Terraform configuration in `terraform/`, a monthly cost budget with tiered
+alerts. Chosen deliberately as the first build because it costs nothing to run
+and provides a guardrail before any billable security service is enabled.

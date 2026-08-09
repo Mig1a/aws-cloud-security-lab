@@ -19,6 +19,8 @@ A hands-on lab for building and exercising detection and response capabilities i
 | Phase | Document | Status |
 | --- | --- | --- |
 | 1 | [Environment Setup](docs/phase-1-environment-setup.md) | Complete |
+| 2 | [Cost Guardrails](docs/phase-2-cost-guardrails.md) | Complete |
+| 3 | Logging and Detection — CloudTrail, GuardDuty | Planned |
 
 ## Prerequisites
 
