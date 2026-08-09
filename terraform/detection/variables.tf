@@ -21,6 +21,20 @@ variable "log_retention_days" {
   }
 }
 
+variable "s3_data_event_arn_prefixes" {
+  description = <<-EOT
+    Object ARN prefixes for which CloudTrail records S3 data events.
+
+    S3 GetObject/PutObject/ListObjects are data events, not management events.
+    They are needed to investigate object access, but are billed per event, so
+    this is scoped to lab incident buckets rather than enabled account-wide.
+
+    Set to [] to turn data events off entirely.
+  EOT
+  type        = list(string)
+  default     = ["arn:aws:s3:::cloudsec-lab-incident-"]
+}
+
 variable "guardduty_finding_frequency" {
   description = <<-EOT
     How often GuardDuty publishes updates to existing findings.

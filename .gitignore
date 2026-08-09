@@ -34,6 +34,12 @@ lambda/**/*.pyc
 lambda/**/venv/
 lambda/**/.venv/
 
+# Raw investigation evidence.
+# CloudTrail records contain the analyst's real source IP address and, on
+# AssumeRole events, the issued session token. Keep the raw JSON local and
+# publish only the redacted write-up.
+incidents/**/evidence/
+
 # OS / editor
 .DS_Store
 Thumbs.db

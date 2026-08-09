@@ -22,7 +22,14 @@ A hands-on lab for building and exercising detection and response capabilities i
 | 2 | [Cost Guardrails](docs/phase-2-cost-guardrails.md) | Complete |
 | 3 | [Base AWS Environment](docs/phase-3-base-environment.md) | Complete |
 | 4 | [Detection Services](docs/phase-4-detection-services.md) | Complete |
-| 5 | Generate and investigate findings | Planned |
+| 5 | [Incident #1 — IAM Investigation](docs/phase-5-incident-01.md) | Complete |
+| 6 | Detection engineering — alert on denied IAM actions | Planned |
+
+## Incidents
+
+| ID | Report | Summary |
+| --- | --- | --- |
+| INC-01 | [IAM Role Activity Investigation](incidents/incident-01/report.md) | 11 actions from one assumed role; 7 denied including a privilege-escalation attempt. Exposed that 7 of 11 were invisible without CloudTrail data events. |
 
 ## Terraform layout
 
