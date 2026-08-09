@@ -47,7 +47,7 @@ straight to email and need no SNS topic or subscription confirmation.
 ### Files
 
 ```
-terraform/
+terraform/budget/
 ├── versions.tf              # Terraform + AWS provider constraints, default tags
 ├── variables.tf             # Inputs with validation
 ├── budget.tf                # The budget resource
@@ -55,6 +55,11 @@ terraform/
 ├── terraform.tfvars.example # Committed template
 └── terraform.tfvars         # Real values — gitignored
 ```
+
+> These files lived directly in `terraform/` when this phase was written.
+> [Phase 3](phase-3-base-environment.md) moved them into `terraform/budget/` so
+> the ephemeral Phase 3 environment could be destroyed without taking the
+> budget with it.
 
 ### Variables
 
@@ -191,10 +196,9 @@ Resolved by clearing regenerable caches, which recovered ~5.2 GB:
 `cleanmgr` was not used — the session was not elevated, and its system targets
 were nearly empty anyway (`C:\Windows.old` absent, update cache 0.01 GB).
 
-**Still unresolved:** Terraform downloads a fresh provider copy into every
-working directory. Setting `TF_PLUGIN_CACHE_DIR` in `~/.terraformrc` makes it
-download once and share, and should be done before the next phase adds more
-Terraform directories.
+**Follow-up:** a plugin cache was configured before Phase 3 to stop the provider
+being duplicated per directory. It did not help on Windows — see
+[Phase 3 §8](phase-3-base-environment.md#8-issue--the-plugin-cache-did-not-save-disk).
 
 ---
 
