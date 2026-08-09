@@ -1,0 +1,39 @@
+# Terraform
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfvars.json
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+.terraform.lock.hcl
+
+# Credentials / secrets
+*.pem
+*.key
+*.p12
+.env
+.env.*
+credentials
+aws_credentials
+
+# Lambda build artifacts
+*.zip
+lambda/**/node_modules/
+lambda/**/__pycache__/
+lambda/**/*.pyc
+lambda/**/venv/
+lambda/**/.venv/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
