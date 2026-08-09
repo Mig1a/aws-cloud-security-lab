@@ -31,6 +31,61 @@ A hands-on lab for building and exercising detection and response capabilities i
 | --- | --- | --- |
 | INC-01 | [IAM Role Misuse Investigation](incidents/incident-01-iam.md) | 11 actions from one assumed role; 7 denied including a privilege-escalation attempt. Exposed that 7 of 11 were invisible without CloudTrail data events. |
 
+## Architecture
+
+```mermaid
+flowchart TB
+    subgraph budget["terraform/budget/ &nbsp;·&nbsp; long-lived"]
+        BUD["<b>AWS Budgets</b><br/>$10/month ceiling<br/>alerts at $5 · $8 · $10 + forecast"]
+    end
+
+    subgraph detection["terraform/detection/ &nbsp;·&nbsp; long-lived"]
+        CT["<b>CloudTrail</b><br/>multi-region · log file validation<br/>management + scoped S3 data events"]
+        S3L["<b>S3 log bucket</b><br/>SSE-S3 · versioned · public access blocked<br/>TLS-only policy · 30-day expiry"]
+        GD["<b>GuardDuty</b><br/>CloudTrail + VPC Flow + DNS logs<br/>paid add-ons disabled"]
+        SH["<b>Security Hub</b><br/>AWS Foundational Best Practices<br/>98 controls"]
+    end
+
+    subgraph env["terraform/environment/ &nbsp;·&nbsp; ephemeral, ~$8/mo"]
+        VPC["<b>VPC</b> 10.0.0.0/16"]
+        SUB["<b>Public subnet</b> 10.0.1.0/24<br/>+ IGW · route table"]
+        SG["<b>Security group</b><br/>no inbound rules"]
+        EC2["<b>EC2</b> t3.micro · AL2023<br/>IMDSv2 required · encrypted EBS"]
+        ROLE["<b>IAM role</b> + instance profile<br/>AmazonSSMManagedInstanceCore only"]
+    end
+
+    subgraph inc["terraform/incident-01/ &nbsp;·&nbsp; exercise"]
+        TROLE["<b>Test role</b><br/>read-only on reports/<br/>explicit deny on restricted/"]
+        TB["<b>Test bucket</b><br/>reports/ · restricted/"]
+    end
+
+    OP(["Operator"]) -->|"SSM Session Manager<br/>no open port, no key pair"| EC2
+    VPC --> SUB --> SG --> EC2
+    ROLE -.attached.-> EC2
+
+    EC2 -->|API activity| CT
+    TROLE -->|"assumed · allowed + denied actions"| TB
+    TB -->|data events| CT
+    TROLE -->|management events| CT
+
+    CT --> S3L
+    CT ==>|"management, flow & DNS logs"| GD
+    GD ==>|findings| SH
+
+    BUD -.->|"email alerts on spend"| OP
+    SH -.->|findings| OP
+
+    classDef longlived fill:#e8f4ea,stroke:#3d7a4f,color:#1a3d28
+    classDef ephemeral fill:#fdf1e3,stroke:#b5711f,color:#5c3a0c
+    classDef exercise fill:#eceaf7,stroke:#5b4b9e,color:#2c2456
+    class BUD,CT,S3L,GD,SH longlived
+    class VPC,SUB,SG,EC2,ROLE ephemeral
+    class TROLE,TB exercise
+```
+
+Green is long-lived and always on. Orange is destroyed between sessions to
+avoid EC2 charges. Purple is per-exercise.
+
 ## Terraform layout
 
 Three states, three lifecycles. Only `environment/` should be destroyed routinely.
