@@ -13,6 +13,33 @@ A hands-on lab for building and exercising detection and response capabilities i
 | `diagrams/` | Architecture and data-flow diagrams |
 | `screenshots/` | Console evidence captured during exercises |
 
+## Prerequisites
+
+| Tool | Purpose |
+| --- | --- |
+| [AWS CLI v2](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) | Authenticating to the lab account and querying resources |
+| [Terraform](https://developer.hashicorp.com/terraform/install) | Provisioning and tearing down lab infrastructure |
+| [Git](https://git-scm.com/downloads) | Version control |
+| [VS Code](https://code.visualstudio.com/) | Editing, with the HashiCorp Terraform and AWS Toolkit extensions |
+| [Python 3.12+](https://www.python.org/downloads/) | Lambda function runtime and helper scripts |
+
+On Windows, install the first two with:
+
+```powershell
+winget install --id Amazon.AWSCLI -e
+winget install --id Hashicorp.Terraform -e
+```
+
+Verify each is on `PATH` in a fresh terminal:
+
+```powershell
+aws --version; terraform version; git --version; python --version
+```
+
+> **Python note:** Lambda code targets **3.13**, matching the `python3.13` Lambda
+> runtime. Create the virtualenv with `py -3.13 -m venv .venv` so the interpreter
+> is pinned explicitly regardless of what bare `python` resolves to.
+
 ## Getting started
 
-_TBD — document prerequisites, AWS account setup, and `terraform apply` steps here._
+_TBD — document AWS account setup, credential profile, and `terraform apply` steps here._
