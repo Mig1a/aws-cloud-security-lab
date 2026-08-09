@@ -30,6 +30,26 @@ A hands-on lab for building and exercising detection and response capabilities i
 | ID | Report | Summary |
 | --- | --- | --- |
 | INC-01 | [IAM Role Misuse Investigation](incidents/incident-01-iam.md) | 11 actions from one assumed role; 7 denied including a privilege-escalation attempt. Exposed that 7 of 11 were invisible without CloudTrail data events. |
+| INC-02 | [Insecure S3 Configuration](incidents/incident-02-s3.md) | Bucket made publicly readable, detected, investigated, and remediated in a 2m23s exposure window. Exposed that Security Hub's S3 controls detect nothing without AWS Config. |
+
+### INC-02 evidence — before and after remediation
+
+Anonymous request carrying no AWS credentials, against the same object:
+
+| Before — `HTTP 200`, world-readable | After — `HTTP 403 AccessDenied` |
+| --- | --- |
+| ![Anonymous read succeeds](screenshots/06-s3-before-anonymous-read.png) | ![Anonymous read denied](screenshots/06-s3-after-access-denied.png) |
+
+Bucket configuration, same console panels:
+
+| Before | After |
+| --- | --- |
+| ![Block public access off](screenshots/06-s3-before-block-public-access-off.png) | ![Block public access on](screenshots/06-s3-after-block-public-access-on.png) |
+| ![Versioning suspended](screenshots/06-s3-before-versioning-suspended.png) | ![Versioning enabled](screenshots/06-s3-after-versioning-enabled.png) |
+
+Remediation was a single Terraform variable — `terraform apply -var=harden=true`,
+`Plan: 2 to add, 5 to change` — rather than a sequence of console clicks. Full
+write-up in [incidents/incident-02-s3.md](incidents/incident-02-s3.md).
 
 ## Architecture
 

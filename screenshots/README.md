@@ -73,6 +73,20 @@ The most valuable images in the repo.
 | 14 | `05-data-event-selectors.png` | CloudTrail → trail → Data events | ARN-prefix scoping — the cost-controlled fix |
 | 15 | `05-investigate-output.png` | Terminal running `investigate.ps1` | Allowed vs denied breakdown |
 
+### Phase 6 — Incident 02 (captured)
+
+Six images, before/after pairs. Account ID redacted with solid boxes in both
+browser shots.
+
+| File | Shows |
+| --- | --- |
+| `06-s3-before-block-public-access-off.png` | Block all public access: **Off** |
+| `06-s3-before-versioning-suspended.png` | Versioning: **Suspended** |
+| `06-s3-before-anonymous-read.png` | Browser with no AWS session reading the object, `HTTP 200` |
+| `06-s3-after-block-public-access-on.png` | Block all public access: **On** |
+| `06-s3-after-versioning-enabled.png` | Versioning: **Enabled** |
+| `06-s3-after-access-denied.png` | Same request returning `AccessDenied` |
+
 ### Tooling
 
 | # | File | Where | Shows |
