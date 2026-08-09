@@ -1,0 +1,19 @@
+# Copy to terraform.tfvars and edit. terraform.tfvars is gitignored.
+# Every value has a working default; this file documents them.
+
+# aws_region         = "us-east-1"
+# project_name       = "cloudsec-lab"
+# log_retention_days = 30
+
+# --- GuardDuty ---
+# guardduty_finding_frequency = "FIFTEEN_MINUTES"
+# guardduty_s3_protection     = true
+
+# Both below are billed extra and are off by default.
+# guardduty_malware_protection = false   # per GB scanned
+# guardduty_runtime_monitoring = false   # per vCPU-hour
+
+# --- Security Hub ---
+# Each standard multiplies the number of billable checks.
+# security_hub_standards = ["aws_foundational"]
+# security_hub_standards = ["aws_foundational", "cis_1_4"]
