@@ -7,7 +7,7 @@ activity with it, and investigate that activity in CloudTrail.
 **Depends on:** [Phase 4 — Detection Services](phase-4-detection-services.md)
 
 The investigation write-up is the real deliverable:
-**[incidents/incident-01/report.md](../incidents/incident-01/report.md)**.
+**[incidents/incident-01-iam.md](../incidents/incident-01-iam.md)**.
 This document covers how it was built.
 
 ---
