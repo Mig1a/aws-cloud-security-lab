@@ -61,13 +61,6 @@ variable "allowed_ssh_cidr" {
   }
 }
 
-variable "log_retention_days" {
-  description = "Days to retain CloudTrail objects in S3 before expiry. Bounds storage cost."
-  type        = number
-  default     = 30
-
-  validation {
-    condition     = var.log_retention_days >= 1
-    error_message = "log_retention_days must be at least 1."
-  }
-}
+# CloudTrail and its log bucket moved to terraform/detection/ in Phase 4, so
+# log_retention_days now lives there. Audit logging must keep running when this
+# ephemeral environment is destroyed.

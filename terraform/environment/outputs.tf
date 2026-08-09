@@ -28,16 +28,6 @@ output "instance_private_ip" {
   value       = aws_instance.lab.private_ip
 }
 
-output "cloudtrail_bucket" {
-  description = "S3 bucket receiving CloudTrail logs."
-  value       = aws_s3_bucket.cloudtrail.id
-}
-
-output "cloudtrail_arn" {
-  description = "ARN of the CloudTrail trail."
-  value       = aws_cloudtrail.lab.arn
-}
-
 output "instance_role_name" {
   description = "IAM role attached to the instance."
   value       = aws_iam_role.instance.name
