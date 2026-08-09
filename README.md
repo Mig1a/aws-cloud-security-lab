@@ -29,7 +29,7 @@ A hands-on lab for building and exercising detection and response capabilities i
 
 | ID | Report | Summary |
 | --- | --- | --- |
-| INC-01 | [IAM Role Activity Investigation](incidents/incident-01/report.md) | 11 actions from one assumed role; 7 denied including a privilege-escalation attempt. Exposed that 7 of 11 were invisible without CloudTrail data events. |
+| INC-01 | [IAM Role Misuse Investigation](incidents/incident-01-iam.md) | 11 actions from one assumed role; 7 denied including a privilege-escalation attempt. Exposed that 7 of 11 were invisible without CloudTrail data events. |
 
 ## Terraform layout
 
