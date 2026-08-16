@@ -20,7 +20,9 @@ This phase is the first piece of infrastructure in the lab that reacts to an
 event instead of waiting to be run.
 
 Infrastructure: [terraform/response/](../terraform/response/).
-Handler: [lambda/securityhub_alert/handler.py](../lambda/securityhub_alert/handler.py).
+Handler: [lambda/securityhub_alert/incident_handler.py](../lambda/securityhub_alert/incident_handler.py)
+— extended in [Phase 8](phase-8-incident-handler.md) beyond what this phase
+needed; the wiring below still describes the deployed pipeline as-is.
 Self-test: [detections/test-high-severity-alert.ps1](../detections/test-high-severity-alert.ps1).
 
 ---
@@ -61,6 +63,8 @@ event_pattern = jsonencode({
   }
 })
 ```
+
+![Event pattern as deployed](../screenshots/07-eventbridge-rule-pattern.png)
 
 Three filters, not one:
 
@@ -109,8 +113,8 @@ environment {
 }
 ```
 
-[`lambda/tests/test_handler.py`](../lambda/tests/test_handler.py) covers this
-directly — `test_mixed_batch_reports_only_high` asserts that a four-finding
+[`lambda/tests/test_incident_handler.py`](../lambda/tests/test_incident_handler.py)
+covers this directly — `test_mixed_batch_reports_only_high` asserts that a four-finding
 batch with one CRITICAL and three low-severity siblings produces exactly one
 alert, not four.
 
@@ -178,9 +182,11 @@ resource "aws_lambda_function" "alert" {
 ```
 
 Without `source_code_hash`, Terraform considers the function converged once
-the zip exists at that path — editing `handler.py` and re-applying would leave
-the *deployed* function unchanged while the stack reports no drift. The hash
-ties deployment to content, so a code change always produces a new version.
+the zip exists at that path — editing `incident_handler.py` and re-applying
+would leave the *deployed* function unchanged while the stack reports no
+drift. The hash ties deployment to content, so a code change always produces
+a new version. This mattered again in Phase 8, when the handler filename
+itself changed.
 
 `lambda/tests/` sits outside `lambda/securityhub_alert/` for the same reason:
 anything under that directory is zipped verbatim into the deployment package.
@@ -254,6 +260,9 @@ finding to EventBridge with the archived state, proving the rule's
 ==> Result
     PASS  alert logged for HIGH
 
+==> Archiving the synthetic finding
+    PASS  archived
+
 SECURITY INCIDENT DETECTED
 
   Finding:   SYNTHETIC LAB FINDING - Phase 7 pipeline self-test (HIGH)
@@ -262,10 +271,13 @@ SECURITY INCIDENT DETECTED
   Account:   <account-id>
   Region:    us-east-1
   Timestamp: 2026-08-16T18:43:30.114Z
-
-==> Archiving the synthetic finding
-    PASS  archived
 ```
+
+That is the field set this phase specified — five fields plus the finding
+title. [Phase 8](phase-8-incident-handler.md) broadens it to eight, and its
+build notes carry the actual CloudWatch Logs screenshots; embedding
+screenshots of the *current* handler here would show fields this phase never
+claimed to produce.
 
 Negative case, run with `-Severity LOW -ExpectNoAlert`:
 
@@ -274,10 +286,11 @@ Negative case, run with `-Severity LOW -ExpectNoAlert`:
     PASS  no alert for LOW - the rule filters as intended
 ```
 
-DLQ confirmed empty after both runs. `lambda/tests/test_handler.py` — 13 unit
-tests covering the severity filter, the mixed-batch re-filter, missing-field
-handling, and the environment-variable path — all pass independently of any
-deployment.
+DLQ confirmed empty after both runs. `lambda/tests/test_incident_handler.py`
+(13 tests at the time this phase closed, since renamed and extended in
+[Phase 8](phase-8-incident-handler.md)) covered the severity filter, the
+mixed-batch re-filter, missing-field handling, and the environment-variable
+path — all passing independently of any deployment.
 
 ---
 
@@ -312,13 +325,19 @@ belong to `detection/` and to the account respectively.
 
 ## Next phase
 
-The pipeline logs; it does not act. The two detection-backlog items this phase
-was built to eventually serve —
+[Phase 8 — the Incident Handler](phase-8-incident-handler.md) broadens what
+this function extracts from a finding — finding ID, type, and description,
+alongside the severity/resource/account/region/timestamp this phase logged —
+so an analyst reading the alert doesn't need a console trip just to know what
+fired. Still read-only.
+
+The pipeline logs; it does not yet act. The two detection-backlog items this
+phase was built to eventually serve —
 [denied `iam:CreateAccessKey`](../detections/README.md#backlog) (INC-01) and
 [near-real-time `PutBucketPolicy`](../detections/README.md#backlog) (INC-02) —
 are GuardDuty/custom findings, not something GuardDuty raises today, so they
 still need either a purpose-built detector or a CloudTrail-driven EventBridge
-rule ahead of this one. The natural Phase 8 is turning `securityhub_alert`
-from a logger into a responder: revoke a session, tighten a bucket policy, or
-open a ticket, gated behind the same `harden`-style explicit trigger used in
-Phase 6 rather than acting automatically on day one.
+rule ahead of this one. Turning `incident_handler` from a logger into a
+responder — revoke a session, tighten a bucket policy, open a ticket, gated
+behind the same `harden`-style explicit trigger used in Phase 6 rather than
+acting automatically on day one — remains open beyond Phase 8.

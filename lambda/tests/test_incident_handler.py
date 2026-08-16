@@ -1,4 +1,4 @@
-"""Unit tests for the Phase 7 alert handler.
+"""Unit tests for the Phase 8 incident handler.
 
 Deliberately outside lambda/securityhub_alert/ - that directory is zipped
 verbatim by the archive_file data source in terraform/response/lambda.tf, so
@@ -6,7 +6,7 @@ anything placed there ships to production inside the deployment package.
 
 No pytest dependency; run it directly:
 
-    py -3.13 lambda/tests/test_handler.py
+    py -3.13 lambda/tests/test_incident_handler.py
 """
 
 import json
@@ -20,13 +20,23 @@ sys.path.insert(
     0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "securityhub_alert")
 )
 
-import handler  # noqa: E402
+import incident_handler as handler  # noqa: E402
 
 
-def finding(severity, title="t", resources=None, account="111122223333"):
+def finding(
+    severity,
+    title="t",
+    resources=None,
+    account="111122223333",
+    finding_id=None,
+    types=None,
+    description="A synthetic finding used for unit testing.",
+):
     return {
-        "Id": f"finding-{severity}-{title}",
+        "Id": finding_id or f"finding-{severity}-{title}",
         "Title": title,
+        "Types": types if types is not None else ["Software and Configuration Checks/Lab/Test"],
+        "Description": description,
         "Severity": {"Label": severity},
         "AwsAccountId": account,
         "Region": "us-east-1",
@@ -87,14 +97,39 @@ class TestSeverityFilter(unittest.TestCase):
 
 
 class TestReportFormat(unittest.TestCase):
+    """Phase 8's field list: Finding ID, Finding type, Severity, Resource,
+    Account, Region, Timestamp, Description - plus Title, carried over from
+    Phase 7 since it's the one human-readable label the others lack."""
+
     def test_contains_every_required_field(self):
-        block = handler._report(finding("HIGH", "Public S3 bucket"))
+        block = handler._report(
+            finding(
+                "HIGH",
+                title="Public S3 bucket",
+                finding_id="arn:aws:securityhub:us-east-1:111122223333:finding/abc-123",
+                types=["Software and Configuration Checks/AWS Security Best Practices/S3.1"],
+                description="An S3 bucket allows public read access.",
+            )
+        )
 
         self.assertIn("SECURITY INCIDENT DETECTED", block)
-        for label in ("Finding:", "Resource:", "Severity:", "Account:", "Region:", "Timestamp:"):
+        for label in (
+            "Finding ID:",
+            "Finding:",
+            "Type:",
+            "Description:",
+            "Resource:",
+            "Severity:",
+            "Account:",
+            "Region:",
+            "Timestamp:",
+        ):
             self.assertIn(label, block)
 
         self.assertIn("Public S3 bucket", block)
+        self.assertIn("arn:aws:securityhub:us-east-1:111122223333:finding/abc-123", block)
+        self.assertIn("S3.1", block)
+        self.assertIn("An S3 bucket allows public read access.", block)
         self.assertIn("111122223333", block)
         self.assertIn("us-east-1", block)
         self.assertIn("2026-08-16T12:00:00.000Z", block)
@@ -112,10 +147,28 @@ class TestReportFormat(unittest.TestCase):
     def test_no_resources(self):
         self.assertEqual(handler._resources(finding("HIGH", resources=[])), "<unknown>")
 
+    def test_multiple_types_are_summarised(self):
+        text = handler._types(finding("HIGH", types=["Type/A", "Type/B"]))
+        self.assertEqual(text, "Type/A (+1 more)")
+
+    def test_no_types(self):
+        self.assertEqual(handler._types(finding("HIGH", types=[])), "<unknown>")
+
+    def test_no_description(self):
+        self.assertEqual(handler._description({}), "<unknown>")
+
+    def test_description_newlines_collapsed(self):
+        """A finding whose free-text Description contains a line break must
+        not visually split into what looks like extra fields in the block."""
+        text = handler._description({"Description": "Line one.\nLine two.\n  Line three."})
+        self.assertEqual(text, "Line one. Line two. Line three.")
+
     def test_structured_line_is_valid_json(self):
         """The compact line must stay parseable for Logs Insights."""
         with patch.object(handler.LOG, "info") as info:
-            handler.lambda_handler(event(finding("HIGH", "parse me")), None)
+            handler.lambda_handler(
+                event(finding("HIGH", "parse me", types=["Type/A", "Type/B"])), None
+            )
 
         payloads = [
             json.loads(c.args[0])
@@ -125,6 +178,10 @@ class TestReportFormat(unittest.TestCase):
         self.assertEqual(len(payloads), 1)
         self.assertEqual(payloads[0]["severity"], "HIGH")
         self.assertEqual(payloads[0]["title"], "parse me")
+        self.assertEqual(payloads[0]["types"], ["Type/A", "Type/B"])
+        self.assertEqual(
+            payloads[0]["description"], "A synthetic finding used for unit testing."
+        )
         self.assertEqual(payloads[0]["resources"], ["arn:aws:s3:::b"])
 
 

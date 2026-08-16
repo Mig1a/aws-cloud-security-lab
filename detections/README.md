@@ -89,8 +89,10 @@ it fires. A check that only ever fails is indistinguishable from a broken one.
 the scripts above. Any Security Hub finding at `HIGH` or `CRITICAL` severity,
 from any source (GuardDuty, standards controls, or a future custom
 `BatchImportFindings` detection), reaches an alert Lambda within seconds via
-EventBridge. It currently only logs `SECURITY INCIDENT DETECTED` — see
-[lambda/README.md](../lambda/README.md).
+EventBridge. [Phase 8](../docs/phase-8-incident-handler.md) extended what it
+extracts to nine fields — Finding ID, Finding, Type, Description, Resource,
+Severity, Account, Region, Timestamp — but it still only logs
+`SECURITY INCIDENT DETECTED`; see [lambda/README.md](../lambda/README.md).
 
 The backlog items below are specific detectors this general pipeline still
 needs: either a GuardDuty finding that doesn't yet exist, or a CloudTrail-driven
@@ -107,7 +109,7 @@ EventBridge rule that reacts before Security Hub is even involved.
 | CloudTrail-driven `PutBucketPolicy` / `PutBucketPublicAccessBlock` rule (does not depend on a Security Hub finding existing first) | [INC-02](../incidents/incident-02-s3.md) | **High** |
 | Root account usage | — | Medium |
 | CloudTrail `StopLogging` / trail deletion | — | **High** |
-| Automated response — act on a [Phase 7](../docs/phase-7-eventbridge-alerting.md) alert instead of only logging it | Phase 7 | Medium |
+| Automated response — act on a [Phase 8](../docs/phase-8-incident-handler.md) alert instead of only logging it | Phase 8 | Medium |
 
 ---
 

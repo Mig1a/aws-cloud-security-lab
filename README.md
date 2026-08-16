@@ -25,7 +25,8 @@ A hands-on lab for building and exercising detection and response capabilities i
 | 5 | [Incident #1 — IAM Investigation](docs/phase-5-incident-01.md) | Complete |
 | 6 | [Incident #2 — Insecure S3 Configuration](docs/phase-6-incident-02.md) | Complete |
 | 7 | [Near-Real-Time Alerting via EventBridge](docs/phase-7-eventbridge-alerting.md) | Complete |
-| 8 | Automated response — act on the Phase 7 alert, not just log it | Planned |
+| 8 | [The Incident Handler](docs/phase-8-incident-handler.md) | Complete |
+| 9 | Automated response — act on the Phase 8 alert, not just log it | Planned |
 
 ## Incidents
 
