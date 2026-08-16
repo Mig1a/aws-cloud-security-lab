@@ -23,7 +23,9 @@ A hands-on lab for building and exercising detection and response capabilities i
 | 3 | [Base AWS Environment](docs/phase-3-base-environment.md) | Complete |
 | 4 | [Detection Services](docs/phase-4-detection-services.md) | Complete |
 | 5 | [Incident #1 — IAM Investigation](docs/phase-5-incident-01.md) | Complete |
-| 6 | Detection engineering — alert on denied IAM actions | Planned |
+| 6 | [Incident #2 — Insecure S3 Configuration](docs/phase-6-incident-02.md) | Complete |
+| 7 | [Near-Real-Time Alerting via EventBridge](docs/phase-7-eventbridge-alerting.md) | Complete |
+| 8 | Automated response — act on the Phase 7 alert, not just log it | Planned |
 
 ## Incidents
 
@@ -66,6 +68,12 @@ flowchart TB
         SH["<b>Security Hub</b><br/>AWS Foundational Best Practices<br/>98 controls"]
     end
 
+    subgraph response["terraform/response/ &nbsp;·&nbsp; long-lived"]
+        EB["<b>EventBridge rule</b><br/>default bus · Severity HIGH/CRITICAL<br/>RecordState ACTIVE · Workflow NEW/NOTIFIED"]
+        LAM["<b>Lambda</b> securityhub_alert<br/>python3.13 · logs only, no remediation"]
+        DLQ["<b>SQS DLQ</b><br/>catches undelivered alerts"]
+    end
+
     subgraph env["terraform/environment/ &nbsp;·&nbsp; ephemeral, ~$8/mo"]
         VPC["<b>VPC</b> 10.0.0.0/16"]
         SUB["<b>Public subnet</b> 10.0.1.0/24<br/>+ IGW · route table"]
@@ -91,6 +99,10 @@ flowchart TB
     CT --> S3L
     CT ==>|"management, flow & DNS logs"| GD
     GD ==>|findings| SH
+    SH ==>|"Findings - Imported"| EB
+    EB ==>|invoke| LAM
+    EB -.->|"failed delivery"| DLQ
+    LAM -->|"SECURITY INCIDENT DETECTED"| CWL[("CloudWatch Logs")]
 
     BUD -.->|"email alerts on spend"| OP
     SH -.->|findings| OP
@@ -98,7 +110,7 @@ flowchart TB
     classDef longlived fill:#e8f4ea,stroke:#3d7a4f,color:#1a3d28
     classDef ephemeral fill:#fdf1e3,stroke:#b5711f,color:#5c3a0c
     classDef exercise fill:#eceaf7,stroke:#5b4b9e,color:#2c2456
-    class BUD,CT,S3L,GD,SH longlived
+    class BUD,CT,S3L,GD,SH,EB,LAM,DLQ,CWL longlived
     class VPC,SUB,SG,EC2,ROLE ephemeral
     class TROLE,TB exercise
 ```
@@ -108,13 +120,15 @@ avoid EC2 charges. Purple is per-exercise.
 
 ## Terraform layout
 
-Three states, three lifecycles. Only `environment/` should be destroyed routinely.
+Separate state per lifecycle. Only `environment/` should be destroyed routinely.
 
 | Directory | Lifecycle |
 | --- | --- |
 | [terraform/budget/](terraform/budget/) | Long-lived. Cost guardrails — leave running. |
 | [terraform/detection/](terraform/detection/) | Long-lived. CloudTrail, GuardDuty, Security Hub — leave running. |
+| [terraform/response/](terraform/response/) | Long-lived. EventBridge rule, alert Lambda, DLQ — leave running. |
 | [terraform/environment/](terraform/environment/) | Ephemeral. **Run `terraform destroy` between sessions** — roughly $8/month if left up. |
+| [terraform/incident-01/](terraform/incident-01/), [terraform/incident-02/](terraform/incident-02/) | Exercise. Destroy once the incident write-up is complete. |
 
 > **Free trials for GuardDuty and Security Hub end approximately 2026-09-08.**
 > Review spend in Cost Explorer before then — see [Phase 4 §6](docs/phase-4-detection-services.md#6-cost).
