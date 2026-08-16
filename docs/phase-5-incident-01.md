@@ -163,7 +163,10 @@ event selector stay in place for the next incident.
 
 ## Next phase
 
-Phase 6 — turn finding 5 from the report into a detection: alert on denied IAM
-actions, particularly `iam:CreateAccessKey`, and store the rule in
-[detections/](../detections/). GuardDuty raised nothing for this activity, and
-correctly so; catching it needs a purpose-built rule.
+[Phase 6 — Incident #2: Insecure S3 Configuration](phase-6-incident-02.md).
+
+Finding 5 from this report — alert on denied IAM actions, particularly
+`iam:CreateAccessKey` — was **deferred to Phase 7**, not dropped. GuardDuty
+raised nothing for this activity, and correctly so; catching it needs a
+purpose-built rule, and it is the top entry in the
+[detection backlog](../detections/README.md#backlog).

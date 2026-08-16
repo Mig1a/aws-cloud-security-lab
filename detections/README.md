@@ -70,12 +70,31 @@ it fires. A check that only ever fails is indistinguishable from a broken one.
 **Known limitations**
 
 - Point-in-time scan, not continuous. A bucket made public and reverted between
-  runs is missed. Real-time coverage needs an EventBridge rule on
-  `PutBucketPolicy` and `PutBucketPublicAccessBlock` — see the backlog.
+  runs is missed. [Phase 7](../docs/phase-7-eventbridge-alerting.md) built the
+  generic real-time pipeline (Security Hub → EventBridge → Lambda); a specific
+  rule matching `PutBucketPolicy` / `PutBucketPublicAccessBlock` directly from
+  CloudTrail, rather than waiting on a Security Hub finding, is still open —
+  see the backlog.
 - Does not inspect object-level ACLs, only bucket-level ownership settings.
 - Does not evaluate cross-account access grants, only anonymous ones.
 - Requires `s3:GetBucket*` across all buckets; runs as an administrative
   principal.
+
+---
+
+## Real-time alerting
+
+[Phase 7](../docs/phase-7-eventbridge-alerting.md) added a standing pipeline —
+[terraform/response/](../terraform/response/) — that is not point-in-time like
+the scripts above. Any Security Hub finding at `HIGH` or `CRITICAL` severity,
+from any source (GuardDuty, standards controls, or a future custom
+`BatchImportFindings` detection), reaches an alert Lambda within seconds via
+EventBridge. It currently only logs `SECURITY INCIDENT DETECTED` — see
+[lambda/README.md](../lambda/README.md).
+
+The backlog items below are specific detectors this general pipeline still
+needs: either a GuardDuty finding that doesn't yet exist, or a CloudTrail-driven
+EventBridge rule that reacts before Security Hub is even involved.
 
 ---
 
@@ -85,9 +104,10 @@ it fires. A check that only ever fails is indistinguishable from a broken one.
 | --- | --- | --- |
 | Denied `iam:CreateAccessKey` / `iam:AttachUserPolicy` | [INC-01](../incidents/incident-01-iam.md) | **High** |
 | Volume of denied IAM actions from one session | [INC-01](../incidents/incident-01-iam.md) | Medium |
-| Near-real-time `PutBucketPolicy` / `PutBucketPublicAccessBlock` alert | [INC-02](../incidents/incident-02-s3.md) | **High** |
+| CloudTrail-driven `PutBucketPolicy` / `PutBucketPublicAccessBlock` rule (does not depend on a Security Hub finding existing first) | [INC-02](../incidents/incident-02-s3.md) | **High** |
 | Root account usage | — | Medium |
 | CloudTrail `StopLogging` / trail deletion | — | **High** |
+| Automated response — act on a [Phase 7](../docs/phase-7-eventbridge-alerting.md) alert instead of only logging it | Phase 7 | Medium |
 
 ---
 
