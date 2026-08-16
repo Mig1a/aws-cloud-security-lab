@@ -1,9 +1,18 @@
-"""Log high-severity Security Hub findings delivered by EventBridge.
+"""Extract and log the fields an incident responder needs from a Security Hub
+finding delivered by EventBridge.
 
-Phase 7. This function deliberately does NOT remediate anything. It is the
-notification half of the detect -> respond pipeline; automated response is a
-later phase. Keeping it read-only means a bad event pattern produces noise in a
-log group rather than an unwanted change to account state.
+Phase 7 built the minimal version of this function - severity/resource/
+account/region/timestamp, enough to prove GuardDuty -> Security Hub ->
+EventBridge -> Lambda actually worked end to end. Phase 8 extends the same
+function with the fields an analyst (or a future automated responder) needs to
+actually act on a finding rather than just notice one: Finding ID (to look it
+up or suppress it later), Finding type (which control or detector fired), and
+Description (what the finding means without a console trip).
+
+Still deliberately read-only. It is the notification half of the detect ->
+respond pipeline; automated remediation is a later phase. Keeping it read-only
+means a bad event pattern produces noise in a log group rather than an
+unwanted change to account state.
 
 Event shape (EventBridge, detail-type "Security Hub Findings - Imported"):
 
@@ -60,8 +69,40 @@ def _resources(finding):
     return f"{ids[0]} (+{len(ids) - 1} more)"
 
 
+def _types(finding):
+    """Flatten the ASFF Types array to a readable one-liner.
+
+    Types is a taxonomy path such as
+    "Software and Configuration Checks/AWS Security Best Practices/S3.1" - the
+    one field that tells an analyst *which control or detector* fired without
+    opening the console. Same one-line-plus-count treatment as _resources,
+    since a finding can carry more than one.
+    """
+    types = finding.get("Types") or []
+    if not types:
+        return UNKNOWN
+    if len(types) == 1:
+        return types[0]
+    return f"{types[0]} (+{len(types) - 1} more)"
+
+
+def _description(finding):
+    """ASFF descriptions are free text and occasionally arrive with embedded
+    newlines. Collapsed to one line so a single finding can't be mistaken for
+    multiple fields in the human-readable block below."""
+    text = finding.get("Description")
+    if not text:
+        return UNKNOWN
+    return " ".join(str(text).split())
+
+
 def _report(finding):
-    """Render one finding as the human-readable alert block."""
+    """Render one finding as the human-readable alert block.
+
+    Fields and label widths are computed together so the colons stay aligned
+    without hand-counting spaces - the Phase 7 version did that by hand and it
+    already needed re-spacing once for one new field.
+    """
     severity = (finding.get("Severity") or {}).get("Label", UNKNOWN)
 
     # UpdatedAt is when Security Hub last saw the finding; CreatedAt is when it
@@ -69,20 +110,23 @@ def _report(finding):
     # costs nothing and is more accurate on re-imports.
     timestamp = finding.get("UpdatedAt") or finding.get("CreatedAt") or UNKNOWN
 
-    return "\n".join(
-        [
-            "",
-            "SECURITY INCIDENT DETECTED",
-            "",
-            f"  Finding:   {finding.get('Title', UNKNOWN)}",
-            f"  Resource:  {_resources(finding)}",
-            f"  Severity:  {severity}",
-            f"  Account:   {finding.get('AwsAccountId', UNKNOWN)}",
-            f"  Region:    {finding.get('Region', UNKNOWN)}",
-            f"  Timestamp: {timestamp}",
-            "",
-        ]
-    )
+    fields = [
+        ("Finding ID", finding.get("Id", UNKNOWN)),
+        ("Finding", finding.get("Title", UNKNOWN)),
+        ("Type", _types(finding)),
+        ("Description", _description(finding)),
+        ("Resource", _resources(finding)),
+        ("Severity", severity),
+        ("Account", finding.get("AwsAccountId", UNKNOWN)),
+        ("Region", finding.get("Region", UNKNOWN)),
+        ("Timestamp", timestamp),
+    ]
+    width = max(len(label) for label, _ in fields) + 1  # +1 for the colon
+
+    lines = ["", "SECURITY INCIDENT DETECTED", ""]
+    lines += [f"  {(label + ':').ljust(width + 1)}{value}" for label, value in fields]
+    lines.append("")
+    return "\n".join(lines)
 
 
 def lambda_handler(event, context):
@@ -113,6 +157,8 @@ def lambda_handler(event, context):
                     "alert": "securityhub_high_severity",
                     "id": finding.get("Id"),
                     "title": finding.get("Title"),
+                    "types": finding.get("Types") or [],
+                    "description": finding.get("Description"),
                     "severity": (finding.get("Severity") or {}).get("Label"),
                     "account": finding.get("AwsAccountId"),
                     "region": finding.get("Region"),

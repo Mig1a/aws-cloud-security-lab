@@ -12,8 +12,8 @@ locals {
 
 # Zipped at plan time from the source tree. source_code_hash below means a code
 # change produces a new deployment on `terraform apply` - without it, editing
-# handler.py leaves the deployed function untouched and the stack lies about
-# being converged.
+# incident_handler.py leaves the deployed function untouched and the stack
+# lies about being converged.
 data "archive_file" "alert" {
   type        = "zip"
   source_dir  = local.source_dir
@@ -79,10 +79,10 @@ resource "aws_iam_role_policy" "alert_logs" {
 
 resource "aws_lambda_function" "alert" {
   function_name = local.function_name
-  description   = "Phase 7 - logs ${join("/", var.alert_severity_labels)} Security Hub findings. Read-only; does not remediate."
+  description   = "Phase 8 - extracts and logs ${join("/", var.alert_severity_labels)} Security Hub finding fields. Read-only; does not remediate."
 
   role    = aws_iam_role.alert.arn
-  handler = "handler.lambda_handler"
+  handler = "incident_handler.lambda_handler"
   runtime = var.lambda_runtime
 
   filename         = data.archive_file.alert.output_path

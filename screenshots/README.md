@@ -87,12 +87,46 @@ browser shots.
 | `06-s3-after-versioning-enabled.png` | Versioning: **Enabled** |
 | `06-s3-after-access-denied.png` | Same request returning `AccessDenied` |
 
+### Phase 7 — EventBridge alerting (partially captured)
+
+No timing constraint — `terraform/response/` is long-lived, not torn down
+between sessions. Run
+[`detections/test-high-severity-alert.ps1`](../detections/test-high-severity-alert.ps1)
+first so the Lambda has actually fired before capturing 21–23.
+
+Item 18 is captured, no redaction needed.
+
+| # | File | Where | Shows |
+| --- | --- | --- | --- |
+| 18 | `07-eventbridge-rule-pattern.png` **(captured, no redaction needed)** | EventBridge → Rules → `cloudsec-lab-securityhub-high-severity` → Event pattern | The three filters: `Severity.Label` HIGH/CRITICAL, `RecordState` ACTIVE, `Workflow.Status` NEW/NOTIFIED |
+| 19 | `07-eventbridge-rule-targets.png` | Same rule → Targets tab | Lambda target with a dead-letter queue configured |
+| 20 | `07-lambda-trigger.png` | Lambda → `cloudsec-lab-securityhub-alert` → Configuration → Triggers | EventBridge rule listed as the trigger |
+| 21 | `07-lambda-monitor-invocations.png` | Lambda → Monitor tab | Invocation graph showing the self-test's real invocations |
+| 22 | `07-dlq-empty.png` | SQS → `cloudsec-lab-securityhub-alert-dlq` → Monitoring | `Messages available: 0` — proof a failed delivery isn't silently vanishing |
+| 23 | `07-self-test-output.png` | Terminal running `test-high-severity-alert.ps1` | `PASS alert logged for HIGH`, and a second run with `-Severity LOW -ExpectNoAlert` showing `PASS no alert for LOW` |
+
+### Phase 8 — Incident handler
+
+**The two alert-block screenshots sent earlier in this session are now
+stale — do not save them.** They were captured before this phase's field
+extraction landed, so their log block only shows the five original fields
+(Finding/Resource/Severity/Account/Region/Timestamp). The deployed function
+now emits eight (Finding ID, Finding, Type, Description, Resource, Severity,
+Account, Region, Timestamp), and the filenames below moved to a `08-` prefix
+to match. Re-run the self-test against the redeployed function and capture
+fresh.
+
+| # | File | Where | Shows |
+| --- | --- | --- | --- |
+| 24 | **`08-security-incident-detected.png`** | CloudWatch Logs → log group → latest stream, expanded `[WARNING]` row, after re-running the self-test against the redeployed function | **The full alert block — all eight fields. Single best image for this phase, same role as #13 in Phase 5.** Account ID appears in the `Finding ID:` ARN, the `Resource:` ARN, and the `Account:` line — box out all three. |
+| 25 | `08-security-incident-detected-structured.png` | Same log stream, expanded `[INFO]` row directly below | The compact JSON line for CloudWatch Logs Insights, now including `types` and `description`. Account ID appears in `"account"`, possibly inside `"id"`, and inside `"resources"` — box out all three. |
+
 ### Tooling
 
 | # | File | Where | Shows |
 | --- | --- | --- | --- |
-| 16 | `00-terraform-apply.png` | Terminal | `Apply complete! Resources: 19 added` |
-| 17 | `00-terraform-destroy.png` | Terminal | `Destroy complete! Resources: 19 destroyed` |
+| 26 | `00-terraform-apply.png` | Terminal | `Apply complete! Resources: 19 added` |
+| 27 | `00-terraform-destroy.png` | Terminal | `Destroy complete! Resources: 19 destroyed` |
 
 ---
 
@@ -111,6 +145,11 @@ Every console page carries identifiers worth removing from a public repo.
 Practical method: crop the browser chrome and the account menu, then draw solid
 boxes (not blur — blur is sometimes reversible) over the remaining IDs. Save as
 PNG.
+
+**Phase 7 specifically:** the `SECURITY INCIDENT DETECTED` log block (#21)
+prints the account ID as plain text in its `Account:` line and inside the
+`Resource:` ARN — not console chrome, the literal log message. Redact both
+before committing, same as any other account ID.
 
 A quick pre-commit grep will not catch text inside images, so this step is
 manual. Check each file before `git add`.

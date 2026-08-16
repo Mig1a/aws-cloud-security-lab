@@ -10,22 +10,26 @@ for exactly that reason.
 
 ## Catalogue
 
-### `securityhub_alert/`
+### `securityhub_alert/` — entry point `incident_handler.py`
 
 **Deployed by:** [terraform/response/](../terraform/response/)
 **Trigger:** EventBridge rule on Security Hub findings at `HIGH`/`CRITICAL`
 severity (configurable — see `var.alert_severity_labels`)
 **Build notes:** [docs/phase-7-eventbridge-alerting.md](../docs/phase-7-eventbridge-alerting.md)
+(wiring), [docs/phase-8-incident-handler.md](../docs/phase-8-incident-handler.md)
+(field extraction)
 
-Logs `SECURITY INCIDENT DETECTED` with the finding, resource, severity,
-account, region, and timestamp. **Read-only — does not remediate anything.**
-This is the notification half of detect-and-respond; automated response is
-still open, tracked in the [detection backlog](../detections/README.md#backlog).
+Logs `SECURITY INCIDENT DETECTED` with finding ID, finding, type, description,
+resource, severity, account, region, and timestamp — everything an analyst
+needs to triage without a console trip. **Read-only — does not remediate
+anything.** This is the notification half of detect-and-respond; automated
+response is still open, tracked in the
+[detection backlog](../detections/README.md#backlog).
 
 Re-filters every finding in the batch it receives against its own severity
 threshold rather than trusting the EventBridge event pattern alone — see
-[handler.py](securityhub_alert/handler.py) and Phase 7 §3 for why the pattern
-alone lets low-severity findings through.
+[incident_handler.py](securityhub_alert/incident_handler.py) and Phase 7 §3
+for why the pattern alone lets low-severity findings through.
 
 ```powershell
 aws logs tail /aws/lambda/cloudsec-lab-securityhub-alert --follow
@@ -36,7 +40,7 @@ aws logs tail /aws/lambda/cloudsec-lab-securityhub-alert --follow
 ## Testing
 
 ```powershell
-py -3.13 lambda/tests/test_handler.py
+py -3.13 lambda/tests/test_incident_handler.py
 ```
 
 No pytest dependency — plain `unittest`, run directly. Exercises the severity
