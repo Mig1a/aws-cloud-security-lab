@@ -20,7 +20,7 @@ provider "aws" {
     tags = {
       Project   = var.project_name
       ManagedBy = "terraform"
-      Phase     = "7"
+      Phase     = "7-9" # alerting (7), field extraction (8), containment (9)
     }
   }
 }

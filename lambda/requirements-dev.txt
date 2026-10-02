@@ -1,0 +1,14 @@
+# Dev/test-only dependency, not a deployment dependency.
+#
+# The Lambda runtime bundles boto3 natively - none of the handlers under
+# lambda/*/ need it listed anywhere for a real deployment, and it must never
+# be added to a function's own subdirectory, since archive_file zips that
+# directory verbatim (see lambda/README.md).
+#
+# It's only needed here so lambda/tests/test_containment_handler.py can
+# import containment_handler.py locally without a real AWS connection - the
+# test suite replaces the actual client with a fake one before any AWS call
+# is made.
+#
+# Install once:  py -3.13 -m pip install -r lambda/requirements-dev.txt
+boto3

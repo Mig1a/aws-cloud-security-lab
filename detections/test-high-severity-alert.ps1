@@ -165,10 +165,23 @@ $found = $null
 while ((Get-Date) -lt $deadline) {
     # The log group may not exist yet if the function has never been invoked.
     try {
+        # The filter pattern needs a literal embedded double-quote on each
+        # side for CloudWatch to treat this as one exact phrase rather than
+        # three independently-required terms. PowerShell silently drops a
+        # backtick-escaped or single-quoted `"..."` when it hands the
+        # argument to a native exe - `aws --debug` confirms the API actually
+        # receives the pattern with no quotes at all unless they're escaped
+        # as \" here, which survives the PowerShell-to-argv boundary intact.
+        # This one happens to still work either way, since the message
+        # contains all three words regardless of match mode - the
+        # Where-Object re-check below is what actually makes that safe to
+        # rely on; see detections/test-automated-containment.ps1 for a
+        # search term (a hyphenated finding ID) where the unescaped version
+        # silently matched nothing.
         $eventsJson = aws logs filter-log-events `
             --log-group-name $logGroup `
             --start-time $startedAtMs `
-            --filter-pattern '"SECURITY INCIDENT DETECTED"' `
+            --filter-pattern '\"SECURITY INCIDENT DETECTED\"' `
             --output json 2>$null
 
         if ($LASTEXITCODE -eq 0 -and $eventsJson) {

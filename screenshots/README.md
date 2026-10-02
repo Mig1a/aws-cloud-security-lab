@@ -121,6 +121,22 @@ fresh.
 | 24 | **`08-security-incident-detected.png`** | CloudWatch Logs → log group → latest stream, expanded `[WARNING]` row, after re-running the self-test against the redeployed function | **The full alert block — all eight fields. Single best image for this phase, same role as #13 in Phase 5.** Account ID appears in the `Finding ID:` ARN, the `Resource:` ARN, and the `Account:` line — box out all three. |
 | 25 | `08-security-incident-detected-structured.png` | Same log stream, expanded `[INFO]` row directly below | The compact JSON line for CloudWatch Logs Insights, now including `types` and `description`. Account ID appears in `"account"`, possibly inside `"id"`, and inside `"resources"` — box out all three. |
 
+### Phase 9 — Automated containment
+
+No timing constraint — `terraform/response/` is long-lived. Run
+[`detections/test-automated-containment.ps1`](../detections/test-automated-containment.ps1)
+(all three scenarios) first so the containment Lambda has actually fired
+before capturing these.
+
+| # | File | Where | Shows |
+| --- | --- | --- | --- |
+| 28 | `09-containment-eventbridge-rule.png` | EventBridge → Rules → `cloudsec-lab-s3-anonymous-access-containment` → Event pattern | The exact `Types` match — one finding type, not HIGH/CRITICAL generally |
+| 29 | `09-containment-iam-policy.png` | IAM → role for the containment Lambda → Permissions | `s3:GetPublicAccessBlock` / `s3:PutPublicAccessBlock` scoped to one bucket ARN, not a wildcard |
+| 30 | **`09-containment-log-contained.png`** | CloudWatch Logs → containment log group → the `Contain` scenario's `contained` line | **The structured log line proving the Lambda made the real API call. Single best image for this phase.** Account ID appears inside the bucket ARN — box it out. |
+| 31 | `09-containment-log-skipped.png` | Same log group → a `skipped_resource_not_allowlisted` line from the `WrongResource` scenario | Proof the allowlist check isn't bypassable by finding type alone |
+| 32 | `09-s3-public-access-block-restored.png` | S3 → the INC-02 bucket → Permissions, immediately after the `Contain` run | All four Block Public Access settings back to **On**, set by the Lambda, not by hand |
+| 33 | `09-containment-dlq-empty.png` | SQS → `cloudsec-lab-s3-containment-dlq` → Monitoring | `Messages available: 0` |
+
 ### Tooling
 
 | # | File | Where | Shows |
@@ -150,6 +166,10 @@ PNG.
 prints the account ID as plain text in its `Account:` line and inside the
 `Resource:` ARN — not console chrome, the literal log message. Redact both
 before committing, same as any other account ID.
+
+**Phase 9 specifically:** the containment log lines (#30, #31) print the
+account ID as plain text inside `bucket_arn` — same treatment, redact before
+committing.
 
 A quick pre-commit grep will not catch text inside images, so this step is
 manual. Check each file before `git add`.
