@@ -26,7 +26,7 @@ A hands-on lab for building and exercising detection and response capabilities i
 | 6 | [Incident #2 — Insecure S3 Configuration](docs/phase-6-incident-02.md) | Complete |
 | 7 | [Near-Real-Time Alerting via EventBridge](docs/phase-7-eventbridge-alerting.md) | Complete |
 | 8 | [The Incident Handler](docs/phase-8-incident-handler.md) | Complete |
-| 9 | Automated response — act on the Phase 8 alert, not just log it | Planned |
+| 9 | [Automated Containment](docs/phase-9-automated-containment.md) | Complete |
 
 ## Incidents
 
@@ -73,6 +73,9 @@ flowchart TB
         EB["<b>EventBridge rule</b><br/>default bus · Severity HIGH/CRITICAL<br/>RecordState ACTIVE · Workflow NEW/NOTIFIED"]
         LAM["<b>Lambda</b> securityhub_alert<br/>python3.13 · logs only, no remediation"]
         DLQ["<b>SQS DLQ</b><br/>catches undelivered alerts"]
+        EB2["<b>EventBridge rule</b><br/>exact Types match only:<br/>S3 anonymous access"]
+        CLAM["<b>Lambda</b> s3_containment<br/>allow-listed bucket only · dry-run by default"]
+        CDLQ["<b>SQS DLQ</b><br/>catches undelivered containment events"]
     end
 
     subgraph env["terraform/environment/ &nbsp;·&nbsp; ephemeral, ~$8/mo"]
@@ -86,6 +89,10 @@ flowchart TB
     subgraph inc["terraform/incident-01/ &nbsp;·&nbsp; exercise"]
         TROLE["<b>Test role</b><br/>read-only on reports/<br/>explicit deny on restricted/"]
         TB["<b>Test bucket</b><br/>reports/ · restricted/"]
+    end
+
+    subgraph inc2["terraform/incident-02/ &nbsp;·&nbsp; exercise"]
+        INC2B["<b>INC-02 bucket</b><br/>hardened policy · the one resource<br/>the containment Lambda may touch"]
     end
 
     OP(["Operator"]) -->|"SSM Session Manager<br/>no open port, no key pair"| EC2
@@ -104,6 +111,11 @@ flowchart TB
     EB ==>|invoke| LAM
     EB -.->|"failed delivery"| DLQ
     LAM -->|"SECURITY INCIDENT DETECTED"| CWL[("CloudWatch Logs")]
+    SH ==>|"Findings - Imported<br/>(S3 anonymous access only)"| EB2
+    EB2 ==>|invoke| CLAM
+    EB2 -.->|"failed delivery"| CDLQ
+    CLAM -->|"PutPublicAccessBlock<br/>(if allow-listed + enabled)"| INC2B
+    CLAM -->|"every decision, logged"| CWL
 
     BUD -.->|"email alerts on spend"| OP
     SH -.->|findings| OP
@@ -111,9 +123,9 @@ flowchart TB
     classDef longlived fill:#e8f4ea,stroke:#3d7a4f,color:#1a3d28
     classDef ephemeral fill:#fdf1e3,stroke:#b5711f,color:#5c3a0c
     classDef exercise fill:#eceaf7,stroke:#5b4b9e,color:#2c2456
-    class BUD,CT,S3L,GD,SH,EB,LAM,DLQ,CWL longlived
+    class BUD,CT,S3L,GD,SH,EB,LAM,DLQ,EB2,CLAM,CDLQ,CWL longlived
     class VPC,SUB,SG,EC2,ROLE ephemeral
-    class TROLE,TB exercise
+    class TROLE,TB,INC2B exercise
 ```
 
 Green is long-lived and always on. Orange is destroyed between sessions to
@@ -127,7 +139,7 @@ Separate state per lifecycle. Only `environment/` should be destroyed routinely.
 | --- | --- |
 | [terraform/budget/](terraform/budget/) | Long-lived. Cost guardrails — leave running. |
 | [terraform/detection/](terraform/detection/) | Long-lived. CloudTrail, GuardDuty, Security Hub — leave running. |
-| [terraform/response/](terraform/response/) | Long-lived. EventBridge rule, alert Lambda, DLQ — leave running. |
+| [terraform/response/](terraform/response/) | Long-lived. EventBridge rules, alert Lambda, containment Lambda, DLQs — leave running. |
 | [terraform/environment/](terraform/environment/) | Ephemeral. **Run `terraform destroy` between sessions** — roughly $8/month if left up. |
 | [terraform/incident-01/](terraform/incident-01/), [terraform/incident-02/](terraform/incident-02/) | Exercise. Destroy once the incident write-up is complete. |
 

@@ -100,6 +100,24 @@ EventBridge rule that reacts before Security Hub is even involved.
 
 ---
 
+## Automated containment
+
+[Phase 9](../docs/phase-9-automated-containment.md) added a second, narrower
+EventBridge rule and a second Lambda alongside the alert pipeline above — one
+that can act, not just log. It is scoped to exactly one finding type
+(GuardDuty's S3 anonymous-access-granted) against exactly one allow-listed
+bucket (this lab's own INC-02 exercise bucket), gated behind an
+`enable_auto_containment` switch that defaults to off. See
+[lambda/README.md](../lambda/README.md) and
+[detections/test-automated-containment.ps1](test-automated-containment.ps1)
+for the self-test.
+
+This is the one exception to "detection only" in this directory, and it's
+narrow on purpose — see Phase 9 §1 for why "any HIGH finding → remediate" was
+rejected as the shape for this.
+
+---
+
 ## Backlog
 
 | Detection | Source incident | Priority |
@@ -109,7 +127,7 @@ EventBridge rule that reacts before Security Hub is even involved.
 | CloudTrail-driven `PutBucketPolicy` / `PutBucketPublicAccessBlock` rule (does not depend on a Security Hub finding existing first) | [INC-02](../incidents/incident-02-s3.md) | **High** |
 | Root account usage | — | Medium |
 | CloudTrail `StopLogging` / trail deletion | — | **High** |
-| Automated response — act on a [Phase 8](../docs/phase-8-incident-handler.md) alert instead of only logging it | Phase 8 | Medium |
+| Containment for a second finding type (one of the rows above), following the [Phase 9](../docs/phase-9-automated-containment.md) narrow-scope pattern | Phase 9 | Medium |
 
 ---
 

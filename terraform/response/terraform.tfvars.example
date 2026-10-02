@@ -1,0 +1,25 @@
+# Copy to terraform.tfvars and edit. terraform.tfvars is gitignored.
+# Every value has a working default; this file documents them.
+
+# aws_region         = "us-east-1"
+# project_name       = "cloudsec-lab"
+# log_retention_days = 14
+
+# --- Phase 7/8: alerting ---
+# alert_severity_labels = ["HIGH", "CRITICAL"]
+
+# --- Phase 9: automated containment ---
+#
+# Off by default. Deploy once, watch a few "would_contain_but_disabled" log
+# lines land in containment_log_group, and only then set this true.
+# enable_auto_containment = true
+
+# Default targets this lab's own INC-02 exercise bucket, computed from your
+# account ID. Override only to add more resources - this is an allowlist,
+# not a prefix, so nothing outside this exact list is ever reachable no
+# matter what enable_auto_containment is set to.
+# containable_resource_arns = [
+#   "arn:aws:s3:::cloudsec-lab-incident-02-<your-account-id>",
+# ]
+
+# containable_finding_types = ["TTPs/Policy:S3-BucketAnonymousAccessGranted"]
