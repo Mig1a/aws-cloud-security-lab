@@ -10,7 +10,7 @@ A hands-on lab for building and exercising detection and response capabilities i
 | `lambda/` | Lambda function source for automated response actions |
 | `detections/` | Detection rules and queries |
 | `incidents/` | Incident write-ups and investigation notes |
-| `diagrams/` | Architecture and data-flow diagrams |
+| `diagrams/` | [Architecture and data-flow diagrams](diagrams/architecture.md) |
 | `screenshots/` | Console evidence captured during exercises |
 | `docs/` | Phase-by-phase build documentation |
 
@@ -57,6 +57,9 @@ Remediation was a single Terraform variable — `terraform apply -var=harden=tru
 write-up in [incidents/incident-02-s3.md](incidents/incident-02-s3.md).
 
 ## Architecture
+
+Module-by-module detail below. For the simplified, whole-lab view, see
+[diagrams/architecture.md](diagrams/architecture.md).
 
 ```mermaid
 flowchart TB
