@@ -26,7 +26,8 @@ A hands-on lab for building and exercising detection and response capabilities i
 | 6 | [Incident #2 — Insecure S3 Configuration](docs/phase-6-incident-02.md) | Complete |
 | 7 | [Near-Real-Time Alerting via EventBridge](docs/phase-7-eventbridge-alerting.md) | Complete |
 | 8 | [The Incident Handler](docs/phase-8-incident-handler.md) | Complete |
-| 9 | [Automated Containment](docs/phase-9-automated-containment.md) | Complete |
+| 9 | [Automated Containment](docs/phase-9-automated-containment.md) | Complete — postmortem in §11 |
+| 10 | [Live Fire-Drill](docs/phase-10-live-fire-drill.md) | Complete |
 
 ## Incidents
 
@@ -34,6 +35,7 @@ A hands-on lab for building and exercising detection and response capabilities i
 | --- | --- | --- |
 | INC-01 | [IAM Role Misuse Investigation](incidents/incident-01-iam.md) | 11 actions from one assumed role; 7 denied including a privilege-escalation attempt. Exposed that 7 of 11 were invisible without CloudTrail data events. |
 | INC-02 | [Insecure S3 Configuration](incidents/incident-02-s3.md) | Bucket made publicly readable, detected, investigated, and remediated in a 2m23s exposure window. Exposed that Security Hub's S3 controls detect nothing without AWS Config. |
+| INC-03 | [Automated Containment's Live Fire-Drill](incidents/incident-03-automated-containment.md) | A real GuardDuty detection reached the Phase 9 containment Lambda, which then crashed on every invocation — wrong IAM action names, masked by a second bug in its own error handling. ~94h exposure before discovery; root-caused, fixed, and re-verified live. |
 
 ### INC-02 evidence — before and after remediation
 

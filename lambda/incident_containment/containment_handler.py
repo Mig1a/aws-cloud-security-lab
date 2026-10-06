@@ -35,6 +35,7 @@ import logging
 import os
 
 import boto3
+from botocore.exceptions import ClientError
 
 LOG = logging.getLogger()
 LOG.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
@@ -162,8 +163,27 @@ def _handle_one(finding):
             config.get("PublicAccessBlockConfiguration", {}).get(key, False)
             for key in _BLOCK_KEYS
         )
-    except _s3_client().exceptions.NoSuchPublicAccessBlockConfiguration:
-        already_blocked = False
+    except ClientError as exc:
+        # Checked by ASFF error *code*, not by a dynamically-generated
+        # `_s3_client().exceptions.NoSuchPublicAccessBlockConfiguration`
+        # class - that attribute does not exist on every botocore version
+        # (the Lambda runtime's bundled version omits it), and accessing a
+        # missing attribute on the exceptions factory raises its own
+        # AttributeError that is NOT caught by the `except Exception` below,
+        # since it happens while Python is still evaluating *this* except
+        # clause's type, not inside the try block. That crashed every real
+        # invocation of this handler in Phase 10's live fire-drill - every
+        # GetPublicAccessBlock error, including an unrelated AccessDenied
+        # from an IAM action-name typo (fixed alongside this), was silently
+        # turned into an unhandled exception instead of a graceful
+        # examine_failed log line. Matching on the string error code is
+        # stable across botocore versions because it's part of the AWS API
+        # contract, not generated Python.
+        if exc.response.get("Error", {}).get("Code") == "NoSuchPublicAccessBlockConfiguration":
+            already_blocked = False
+        else:
+            _log("examine_failed", finding, bucket_arn=bucket_arn, detail=str(exc))
+            return "examine_failed"
     except Exception as exc:  # noqa: BLE001 - the examine step must not crash the handler
         _log("examine_failed", finding, bucket_arn=bucket_arn, detail=str(exc))
         return "examine_failed"

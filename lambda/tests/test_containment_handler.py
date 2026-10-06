@@ -17,6 +17,8 @@ import sys
 import unittest
 from unittest.mock import patch
 
+from botocore.exceptions import ClientError
+
 sys.path.insert(
     0,
     os.path.join(
@@ -31,9 +33,12 @@ OTHER_ARN = "arn:aws:s3:::not-on-the-allowlist"
 KNOWN_TYPE = "TTPs/Policy:S3-BucketAnonymousAccessGranted"
 
 
-class FakeExceptions:
-    class NoSuchPublicAccessBlockConfiguration(Exception):
-        pass
+def client_error(code, operation="GetPublicAccessBlock", message="boom"):
+    """A real botocore.exceptions.ClientError, not a hand-rolled stand-in -
+    see the regression test below for why that distinction is the whole
+    point: Phase 10's live fire-drill was silently broken by code that
+    assumed a different, hand-rolled fake's shape rather than this one."""
+    return ClientError({"Error": {"Code": code, "Message": message}}, operation)
 
 
 class FakeS3Client:
@@ -46,7 +51,6 @@ class FakeS3Client:
         self.blocked_buckets = set(blocked_buckets or ())
         self.raise_on_get = raise_on_get
         self.raise_on_put = raise_on_put
-        self.exceptions = FakeExceptions
         self.get_calls = []
         self.put_calls = []
 
@@ -55,7 +59,7 @@ class FakeS3Client:
         if self.raise_on_get:
             raise self.raise_on_get
         if Bucket not in self.blocked_buckets:
-            raise self.exceptions.NoSuchPublicAccessBlockConfiguration("no config")
+            raise client_error("NoSuchPublicAccessBlockConfiguration")
         return {
             "PublicAccessBlockConfiguration": {
                 "BlockPublicAcls": True,
@@ -172,6 +176,31 @@ class TestExamineStep(ContainmentTestCase):
 
     def test_examine_failure_is_logged_and_skipped(self):
         fake = use_fake_s3(self, raise_on_get=RuntimeError("access denied"))
+        result = handler.lambda_handler(
+            event(finding([KNOWN_TYPE], [s3_bucket_resource(ALLOWED_ARN)])), None
+        )
+        self.assertEqual(result["results"], ["examine_failed"])
+        self.assertEqual(fake.put_calls, [])
+
+    def test_access_denied_on_examine_is_logged_not_crashed(self):
+        """Regression test for Phase 10's live fire-drill: the deployed IAM
+        policy granted the wrong action names (s3:GetPublicAccessBlock
+        instead of the real s3:GetBucketPublicAccessBlock), so every real
+        invocation hit AccessDenied here. The handler's own exception
+        matching made this worse, not better - `except
+        _s3_client().exceptions.NoSuchPublicAccessBlockConfiguration` raised
+        its own AttributeError on this runtime's botocore (see
+        containment_handler.py), which is not caught by `except Exception`
+        and crashed the whole invocation instead of logging
+        examine_failed. The bucket sat publicly exposed for about four days
+        before anyone (anything) noticed - a crash neither EventBridge's
+        target-level DLQ nor the function's own retries made visible,
+        because the Lambda WAS successfully invoked each time; it just
+        failed once inside. A hand-rolled fake exception class previously
+        in this file could never have caught this - it always defined the
+        exact attribute the code expected, which is exactly backwards from
+        what a real, version-dependent botocore client does."""
+        fake = use_fake_s3(self, raise_on_get=client_error("AccessDenied"))
         result = handler.lambda_handler(
             event(finding([KNOWN_TYPE], [s3_bucket_resource(ALLOWED_ARN)])), None
         )

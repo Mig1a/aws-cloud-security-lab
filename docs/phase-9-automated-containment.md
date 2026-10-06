@@ -1,10 +1,12 @@
 # Phase 9 — Automated Containment
 
-**Date:** 2026-08-16
+**Date:** 2026-08-16 (postmortem addendum: 2026-10-06, see §11)
 **Objective:** Turn the Phase 8 handler from observer into responder, for
 exactly one known finding type against exactly one known resource — not
 "any HIGH finding → act."
-**Status:** Complete
+**Status:** Complete — **with a postmortem.** This phase's first real exercise
+(Phase 10) found the deployment silently non-functional. See §11 and
+[incidents/incident-03-automated-containment.md](../incidents/incident-03-automated-containment.md).
 **Depends on:** [Phase 8 — The Incident Handler](phase-8-incident-handler.md),
 [Phase 6 — Incident #2 (insecure S3 configuration)](phase-6-incident-02.md)
 
@@ -342,3 +344,74 @@ pattern to a second finding type means adding a second explicit entry to
 both `containable_finding_types` and a matching remediation branch in the
 handler — never widening the existing match to "any HIGH finding," for the
 same reason this phase started narrow.
+
+---
+
+## 11. Postmortem (added 2026-10-06)
+
+**This phase's own verification (§8) never actually exercised the real
+failure path.** The unit tests passed, `terraform plan`/`validate` were
+clean, and the live account matched configuration — all true, and all
+insufficient. The first time this Lambda was exercised against a real,
+live-fire GuardDuty detection (Phase 10), it crashed on every invocation and
+the bucket it was supposed to protect sat publicly exposed for **about 94
+hours** before anyone noticed. Full incident writeup:
+[incidents/incident-03-automated-containment.md](../incidents/incident-03-automated-containment.md).
+
+Two independent bugs, each hiding the other:
+
+1. **Wrong IAM action names.** §4 above granted `s3:GetPublicAccessBlock` /
+   `s3:PutPublicAccessBlock` — the boto3/botocore *client method* names, not
+   the actual IAM *action* names (`s3:GetBucketPublicAccessBlock` /
+   `s3:PutBucketPublicAccessBlock` — note "Bucket", confirmed from the real
+   `AccessDenied` error and matching CloudTrail `eventName`). Every real
+   invocation was denied at the IAM layer before it could do anything.
+2. **The examine step's own exception handling crashed instead of
+   degrading.** `except _s3_client().exceptions.NoSuchPublicAccessBlockConfiguration`
+   evaluates that attribute fresh every time any exception needs matching —
+   and on this Lambda runtime's bundled botocore version, that attribute
+   doesn't exist, so the attempt to check it raised its own `AttributeError`.
+   That error is not caught by the `except Exception` immediately below it
+   (it happens while evaluating the *first* except clause's type, not inside
+   the `try`), so it escaped as an unhandled crash instead of the intended
+   `examine_failed` log line.
+
+**Why §8's "31/31 tests pass" didn't catch either one.** The unit test suite
+used a hand-rolled fake S3 client whose `exceptions.NoSuchPublicAccessBlockConfiguration`
+*always existed*, because the test author wrote it to exist — it modeled the
+interface the code expected, not the version-dependent reality of a real
+botocore client. And no unit test exercises IAM at all; that category of bug
+is invisible to a test suite that never makes a real AWS call, by
+construction. Neither gap was a testing mistake exactly — it's what *every*
+offline unit test suite is structurally blind to. The lesson carried forward:
+mocks that are too accommodating are a false negative waiting to happen, and
+dry-run/`terraform plan` confidence is not the same claim as "this actually
+works against the real API."
+
+**Why the dead-letter queue didn't catch it either.** §6's DLQ only covers
+EventBridge failing to *invoke* the Lambda. Here, EventBridge invoked it
+successfully three times (Lambda's own default two automatic retries on an
+async invocation error) and the function itself failed all three — a
+distinct failure mode that needs the function's *own*
+`dead_letter_config`, which did not exist until this postmortem added one.
+The exact gap Phase 9 §5 warned about in prose — "a containment function
+that stays silent... is unauditable" — existed in the infrastructure too,
+not just the application code.
+
+**Fixed, same day, verified against the real deployed pipeline:**
+
+- `terraform/response/containment_lambda.tf` — corrected action names;
+  added a function-level `dead_letter_config` (shares the existing DLQ) plus
+  the `sqs:SendMessage` permission it needs.
+- `lambda/incident_containment/containment_handler.py` — replaced the
+  dynamic `.exceptions.X` lookup with a `botocore.exceptions.ClientError` +
+  string error-code check, which is stable across botocore versions.
+- `lambda/tests/test_containment_handler.py` — the fake client now raises a
+  real `botocore.exceptions.ClientError` instead of a hand-rolled stand-in,
+  and a new regression test (`test_access_denied_on_examine_is_logged_not_crashed`)
+  reproduces the exact production failure.
+- Re-verified with [`detections/test-automated-containment.ps1`](../detections/test-automated-containment.ps1)
+  against the live, redeployed pipeline — all three scenarios (`Contain`,
+  `WrongResource`, `WrongType`) pass, with the `Contain` scenario confirming
+  via the real S3 API that the Lambda's own `PutPublicAccessBlock` call
+  restored Block Public Access, not just that a log line said so.
