@@ -10,13 +10,38 @@ investigation and automated remediation within AWS.
 ![Tests](https://img.shields.io/badge/lambda%20tests-32%20passing-2ea44f)
 ![Cost](https://img.shields.io/badge/budget-%2410%2Fmonth%20hard%20ceiling-blue)
 
-Ten phases, two real incident investigations, and one real production bug
+Ten phases, three real incident investigations, and one real production bug
 found and fixed live against the actual AWS account — not a sandbox mockup.
 Every number in this README (timestamps, finding IDs, exposure windows) is
 sourced from real CloudTrail, GuardDuty, Security Hub, and CloudWatch Logs
 output, captured during the work, not written after the fact.
 
-**Jump to:** [Architecture](#architecture) ·
+## Results
+
+| Metric | Value |
+| --- | --- |
+| Security incidents investigated & written up | **3** — [INC-01](incidents/incident-01-iam.md), [INC-02](incidents/incident-02-s3.md), [INC-03](incidents/incident-03-automated-containment.md) |
+| Detection workflows | **3** — real-time Security Hub/EventBridge alerting (any HIGH/CRITICAL finding), a custom 6-control S3 posture check, CloudTrail-based IAM session reconstruction |
+| Automated remediation workflows | **1, deliberately** — one known finding type, one allow-listed resource, one non-destructive API call (see [why narrow beats broad](docs/phase-9-automated-containment.md#1-the-scope-decision)) |
+| Infrastructure deployed via Terraform | **100%** — 6 independent state directories, zero console-created resources |
+| Lambda unit tests | **32 passing**, zero network calls, zero real AWS credentials required |
+| EventBridge → Lambda invocation latency | **< 1 second**, consistently, Phases 7–9 |
+| Finding import → verified automated remediation | **~12 seconds** end to end (synthetic self-test, post-fix — [INC-03](incidents/incident-03-automated-containment.md#6-verification)) |
+| Real-world GuardDuty detection latency | **~7m19s**, genuine `PutBucketPolicy` → GuardDuty finding, measured once live, not assumed |
+| Monthly cost ceiling | **$10**, hard budget, alerts at $5 / $8 / $10 + forecast |
+
+> **The number that isn't flattering, included anyway:** the first time the
+> automated remediation above ran against a real attack — not a synthetic
+> test — it failed silently on every attempt, and the exposure it was built
+> to close instead lasted **~94 hours** before a manual check caught it. Two
+> real bugs, root-caused from raw CloudTrail and CloudWatch evidence (not
+> guessed at), fixed, and re-verified live the same day they were found. A
+> fast demo is easy to stage; a real failure, found and fixed, is the actual
+> proof this works. Full story:
+> [incidents/incident-03-automated-containment.md](incidents/incident-03-automated-containment.md).
+
+**Jump to:** [Results](#results) ·
+[Architecture](#architecture) ·
 [Technologies](#technologies) ·
 [Security Objectives](#security-objectives) ·
 [Infrastructure Deployment](#infrastructure-deployment) ·
@@ -384,11 +409,13 @@ summarized from a console banner:
 - **CloudTrail `lookup-events`**, reconstructed into a chronological timeline
   — INC-01 and INC-03 both include a full management-event table with
   principal, action, and significance columns.
-- **Custom detection scripts** in [`detections/`](detections/) —
-  `investigate.ps1` (IAM session reconstruction), `s3-posture-check.ps1`
-  (six-control S3 posture check that Security Hub's own controls could not
-  perform without AWS Config), and the self-test scripts that exercise the
-  live alerting/containment pipeline end to end.
+- **Custom detection scripts** —
+  [`incidents/incident-01/investigate.ps1`](incidents/incident-01/investigate.ps1)
+  (IAM session reconstruction from CloudTrail), and in
+  [`detections/`](detections/): `s3-posture-check.ps1` (six-control S3
+  posture check that Security Hub's own controls could not perform without
+  AWS Config) and the self-test scripts that exercise the live
+  alerting/containment pipeline end to end.
 - **Direct verification against the real API**, not just a log line — every
   remediation in this repo is confirmed by re-querying the actual resource
   state (`get-public-access-block`, an anonymous `curl` request) rather than
