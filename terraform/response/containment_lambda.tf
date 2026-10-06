@@ -80,6 +80,35 @@ resource "aws_iam_role_policy" "containment_logs" {
   policy = data.aws_iam_policy_document.containment_logs.json
 }
 
+# --- Function-level dead letter queue ---------------------------------------
+#
+# Distinct from containment_eventbridge.tf's rule-target DLQ, which only
+# catches EventBridge failing to INVOKE this function at all (e.g. the
+# lambda:InvokeFunction permission below being missing). Phase 10's live
+# fire-drill found the gap this closes: the function WAS invoked
+# successfully three times (EventBridge's retry_policy below) and crashed
+# inside all three - a failure mode the rule-target DLQ cannot see, because
+# from EventBridge's point of view the invoke succeeded every time. Lambda's
+# own asynchronous-invocation dead_letter_config is what catches "invoked
+# fine, then the function itself errored out after every retry" - the one
+# this phase actually hit, which until now went to the same place every
+# `would_contain_but_disabled` dry-run log line goes when nothing is wrong:
+# nowhere visible.
+data "aws_iam_policy_document" "containment_dlq_send" {
+  statement {
+    sid       = "SendFailedInvocationsToOwnDLQ"
+    effect    = "Allow"
+    actions   = ["sqs:SendMessage"]
+    resources = [aws_sqs_queue.containment_dlq.arn]
+  }
+}
+
+resource "aws_iam_role_policy" "containment_dlq_send" {
+  name   = "send-failed-invocations-to-dlq"
+  role   = aws_iam_role.containment.id
+  policy = data.aws_iam_policy_document.containment_dlq_send.json
+}
+
 # The one write permission this entire lab grants outside of Terraform
 # itself. `resources` is local.containable_resource_arns - an explicit
 # allowlist, never a wildcard, never a prefix. `count` means an operator who
@@ -87,6 +116,16 @@ resource "aws_iam_role_policy" "containment_logs" {
 # permissions at all, not a policy with an empty resource list (which some
 # providers reject outright, and which would be a confusing way to represent
 # "nothing is allowed").
+#
+# Action names are s3:Get/PutBucketPublicAccessBlock - WITH "Bucket" in the
+# name. This is the actual IAM action name AWS exposes for this API (matching
+# the CloudTrail eventName and what shows up in an AccessDenied message), NOT
+# the boto3/botocore client method name (s3api get/put-public-access-block,
+# no "Bucket"). The two were out of sync here for the whole life of Phase 9 -
+# every real invocation of this role got AccessDenied, invisibly, because the
+# policy granted an action name that doesn't exist. Found during Phase 10's
+# live fire-drill: see docs/phase-9-automated-containment.md's postmortem
+# note and incidents/incident-03-automated-containment.md.
 data "aws_iam_policy_document" "containment_s3" {
   count = length(local.containable_resource_arns) > 0 ? 1 : 0
 
@@ -95,8 +134,8 @@ data "aws_iam_policy_document" "containment_s3" {
     effect = "Allow"
 
     actions = [
-      "s3:GetPublicAccessBlock",
-      "s3:PutPublicAccessBlock",
+      "s3:GetBucketPublicAccessBlock",
+      "s3:PutBucketPublicAccessBlock",
     ]
 
     resources = local.containable_resource_arns
@@ -138,8 +177,19 @@ resource "aws_lambda_function" "containment" {
     }
   }
 
+  # Catches the function itself erroring out after Lambda's own built-in
+  # async-invocation retries are exhausted - distinct from, and not covered
+  # by, the EventBridge rule target's retry_policy/dead_letter_config in
+  # containment_eventbridge.tf (that one only fires if EventBridge can't
+  # invoke this function at all). See the IAM policy above this resource for
+  # why this phase needed to learn that distinction the hard way.
+  dead_letter_config {
+    target_arn = aws_sqs_queue.containment_dlq.arn
+  }
+
   depends_on = [
     aws_cloudwatch_log_group.containment,
     aws_iam_role_policy.containment_logs,
+    aws_iam_role_policy.containment_dlq_send,
   ]
 }

@@ -34,6 +34,13 @@ resource "aws_cloudwatch_event_target" "containment_lambda" {
   # Same reasoning as the alert rule's target (eventbridge.tf): a dropped
   # containment event is worse here than a dropped log line, since it means
   # a real exposure went uncontained with no record of why.
+  #
+  # This only covers EventBridge failing to INVOKE the Lambda (e.g. the
+  # permission below being wrong or missing) - it does not see the function
+  # being invoked successfully and then erroring out internally. That second
+  # failure mode is real (Phase 10 hit it) and is covered separately by
+  # containment_lambda.tf's dead_letter_config on the function itself, which
+  # shares this same queue.
   retry_policy {
     maximum_event_age_in_seconds = 3600
     maximum_retry_attempts       = 3
