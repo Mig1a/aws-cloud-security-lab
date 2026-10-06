@@ -131,11 +131,30 @@ before capturing these.
 | # | File | Where | Shows |
 | --- | --- | --- | --- |
 | 28 | `09-containment-eventbridge-rule.png` | EventBridge → Rules → `cloudsec-lab-s3-anonymous-access-containment` → Event pattern | The exact `Types` match — one finding type, not HIGH/CRITICAL generally |
-| 29 | `09-containment-iam-policy.png` | IAM → role for the containment Lambda → Permissions | `s3:GetPublicAccessBlock` / `s3:PutPublicAccessBlock` scoped to one bucket ARN, not a wildcard |
+| 29 | `09-containment-iam-policy.png` | IAM → role for the containment Lambda → Permissions | `s3:GetBucketPublicAccessBlock` / `s3:PutBucketPublicAccessBlock` scoped to one bucket ARN, not a wildcard — corrected in [Incident 03](../incidents/incident-03-automated-containment.md); capture the post-fix policy, not the original typo'd one |
 | 30 | **`09-containment-log-contained.png`** | CloudWatch Logs → containment log group → the `Contain` scenario's `contained` line | **The structured log line proving the Lambda made the real API call. Single best image for this phase.** Account ID appears inside the bucket ARN — box it out. |
 | 31 | `09-containment-log-skipped.png` | Same log group → a `skipped_resource_not_allowlisted` line from the `WrongResource` scenario | Proof the allowlist check isn't bypassable by finding type alone |
 | 32 | `09-s3-public-access-block-restored.png` | S3 → the INC-02 bucket → Permissions, immediately after the `Contain` run | All four Block Public Access settings back to **On**, set by the Lambda, not by hand |
 | 33 | `09-containment-dlq-empty.png` | SQS → `cloudsec-lab-s3-containment-dlq` → Monitoring | `Messages available: 0` |
+
+### README's top-level Screenshots section (the 7 required categories)
+
+Referenced directly from `README.md`'s own
+[Screenshots](../README.md#screenshots) section, each already backed there by
+real CLI/log evidence — these seven PNGs are the last piece needed to swap
+that evidence for console captures. No new timing constraint beyond what
+each underlying phase already required (Phase 9/10 for 1–2 and 5–7; any time
+for 3–4).
+
+| # | File | Where | Shows |
+| --- | --- | --- | --- |
+| 34 | `11-guardduty-finding.png` | GuardDuty → Findings → `66cff41a3cd156e2591849cf30f0cfb1`, expanded | The `Policy:S3/BucketAnonymousAccessGranted` finding detail panel |
+| 35 | `11-securityhub-finding.png` | Security Hub → Findings → same finding (filter by ID) | `RecordState: ACTIVE`, `Severity: HIGH`, imported from GuardDuty |
+| 36 | `11-cloudtrail-putbucketpolicy.png` | CloudTrail → Event history → `PutBucketPolicy`, `2026-10-02T20:53:53Z`, expanded | The real API call that caused the finding — actor, timestamp, resource |
+| 37 | `11-eventbridge-rule.png` | EventBridge → Rules → `cloudsec-lab-s3-anonymous-access-containment` → Event pattern tab | The narrow, exact-`Types` containment rule (same underlying resource as #28, framed for the README rather than the Phase 9 section) |
+| 38 | `11-lambda-execution-contained.png` | CloudWatch Logs → containment log group → the `2026-10-06T19:24:20.259Z` stream, `[WARNING]` row | The post-fix `"containment_action": "contained"` line |
+| 39 | `11-terraform-apply.png` | Terminal running the containment-fix `terraform apply` | `Plan: 1 to add, 2 to change, 0 to destroy` → `Apply complete!` |
+| 40 | `11-automated-remediation.png` | Terminal running `test-automated-containment.ps1` | `PASS S3 confirms Block Public Access is restored` — remediation verified against the real API, not just a log line |
 
 ### Tooling
 
