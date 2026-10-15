@@ -171,7 +171,7 @@ Every console page carries identifiers worth removing from a public repo.
 
 | Redact | Appears in | Notes |
 | --- | --- | --- |
-| **Account ID `089110987191`** | Console header, every ARN, bucket names | Most common leak |
+| **Account ID `0891****7191`** | Console header, every ARN, bucket names | Most common leak |
 | **Your public IP** | CloudTrail event details `sourceIPAddress` | Same value redacted from the incident report |
 | **Session tokens / access key IDs** | AssumeRole `responseElements` | Never screenshot an expanded AssumeRole response |
 | Email address | Budget alert subscribers | |

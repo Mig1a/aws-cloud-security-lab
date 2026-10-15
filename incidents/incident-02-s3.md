@@ -9,7 +9,7 @@
 | **Remediated** | 2026-08-09 20:10:30 UTC |
 | **Exposure window** | **2m23s** (plus a second, deliberate ~15m window for evidence capture — see §2) |
 | **Analyst** | mella-admin |
-| **Account** | 089110987191 (us-east-1) |
+| **Account** | 0891****7191 (us-east-1) |
 | **Status** | Closed — remediated and verified |
 
 > **Training exercise.** The misconfiguration was introduced deliberately by the
@@ -31,7 +31,7 @@ Misconfiguration  →  Detection  →  Investigation  →  Remediation  →  Ver
 
 ## 1. Misconfiguration
 
-A bucket, `cloudsec-lab-incident-02-089110987191`, was created with five
+A bucket, `cloudsec-lab-incident-02-0891****7191`, was created with five
 controls deliberately absent.
 
 ### Before
@@ -69,7 +69,7 @@ Detected by [`detections/s3-posture-check.ps1`](../detections/s3-posture-check.p
 which evaluates every bucket against six controls.
 
 ```
-=== cloudsec-lab-incident-02-089110987191 ===
+=== cloudsec-lab-incident-02-0891****7191 ===
   S3-1   Block Public Access            FAIL  acls=False policy=False ignoreAcls=False restrict=False
   S3-2   No anonymous policy grant      FAIL  public Allow statement(s): PublicReadGetObject
   S3-3   ACLs disabled                  FAIL  objectOwnership=ObjectWriter
@@ -296,7 +296,7 @@ holding real data is that anything publicly readable was read.
 
 | Resource | Identifier | Impact |
 | --- | --- | --- |
-| S3 bucket | `cloudsec-lab-incident-02-089110987191` | Publicly readable for 2m23s |
+| S3 bucket | `cloudsec-lab-incident-02-0891****7191` | Publicly readable for 2m23s |
 | Object | `public-brochure.txt` | Exposed (intended to be readable) |
 | Object | `internal/employees.csv` | **Exposed** (synthetic) |
 | Object | `internal/api-notes.txt` | **Exposed** (synthetic; read during verification) |

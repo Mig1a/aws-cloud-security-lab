@@ -12,7 +12,7 @@
 | **Automation root-caused, fixed, re-verified** | 2026-10-06 19:24:20 UTC |
 | **Exposure window** | **~94h19m** — the automated path never completed |
 | **Analyst** | mella-admin, with Claude (Sonnet 5) driving the live exercise |
-| **Account** | 089110987191 (us-east-1) |
+| **Account** | 0891****7191 (us-east-1) |
 | **Status** | Closed — remediated, root-caused, fixed, and re-verified against the real pipeline |
 
 > **Training exercise, with an unplanned result.** The misconfiguration was
@@ -47,7 +47,7 @@ Controlled event   CloudTrail        GuardDuty         EventBridge→Lambda    C
 
 ## 1. The controlled security event
 
-The INC-02 bucket (`cloudsec-lab-incident-02-089110987191`) was purpose-built
+The INC-02 bucket (`cloudsec-lab-incident-02-0891****7191`) was purpose-built
 in [Phase 6](../docs/phase-6-incident-02.md) for exactly this: one bucket
 whose every control reads `var.harden ? secure : insecure`, so reproducing
 the misconfiguration is a one-line, reviewable Terraform diff rather than a
@@ -64,7 +64,7 @@ only ever toggles Block Public Access directly via `s3api
 put-public-access-block`. This exercise instead reproduced the **actual**
 original attack: `PutBucketPolicy` adding a public-read `Allow` statement
 back — the same API call GuardDuty's finding already named as the cause of
-the original INC-02 incident (`AccountId` `089110987191`, actor
+the original INC-02 incident (`AccountId` `0891****7191`, actor
 `mella-admin`, finding ID `66cff41a3cd156e2591849cf30f0cfb1`, first raised
 2026-08-09). Running this again against the same bucket reactivated the same
 finding rather than minting a new one — GuardDuty aggregates repeat
@@ -74,7 +74,7 @@ incrementing a counter on the existing finding, not by creating a new ID.
 Confirmed exposed immediately after the apply:
 
 ```
-GET https://cloudsec-lab-incident-02-089110987191.s3.amazonaws.com/internal/api-notes.txt
+GET https://cloudsec-lab-incident-02-0891****7191.s3.amazonaws.com/internal/api-notes.txt
 HTTP 200 — publicly readable, no AWS credentials sent
 ```
 
@@ -149,10 +149,10 @@ Traceback (most recent call last):
 ```
 EventName:    GetBucketPublicAccessBlock
 errorCode:    AccessDenied
-errorMessage: User: arn:aws:sts::089110987191:assumed-role/cloudsec-lab-s3-containment-role/
+errorMessage: User: arn:aws:sts::0891****7191:assumed-role/cloudsec-lab-s3-containment-role/
               cloudsec-lab-s3-containment is not authorized to perform:
               s3:GetBucketPublicAccessBlock on resource:
-              "arn:aws:s3:::cloudsec-lab-incident-02-089110987191" because no
+              "arn:aws:s3:::cloudsec-lab-incident-02-0891****7191" because no
               identity-based policy allows the s3:GetBucketPublicAccessBlock action
 ```
 
@@ -336,7 +336,7 @@ not the bucket policy — is the real finding of this incident.
 
 | Resource | Identifier | Impact |
 | --- | --- | --- |
-| S3 bucket | `cloudsec-lab-incident-02-089110987191` | Publicly readable for ~94h19m |
+| S3 bucket | `cloudsec-lab-incident-02-0891****7191` | Publicly readable for ~94h19m |
 | Object | `internal/api-notes.txt` | Exposed; read only during this exercise's own verification |
 | Lambda function | `cloudsec-lab-s3-containment` | Crashed on every real invocation until fixed in this incident |
 | IAM role | `cloudsec-lab-s3-containment-role` | Policy corrected (action names) |
