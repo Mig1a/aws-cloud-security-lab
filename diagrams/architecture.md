@@ -11,7 +11,7 @@ deliberately the simplified, whole-lab view.
 ```mermaid
 flowchart TB
     IAM0["<b>Operator</b><br/>mella-admin"]
-    ACCT["<b>AWS Account</b><br/>089110987191 · us-east-1"]
+    ACCT["<b>AWS Account</b><br/>0891****7191 · us-east-1"]
     BUD["<b>AWS Budgets</b><br/>$10/month ceiling"]
 
     IAM0 --> ACCT

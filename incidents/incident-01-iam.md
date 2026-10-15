@@ -7,7 +7,7 @@
 | **Detected** | 2026-08-09 19:10 UTC |
 | **Closed** | 2026-08-09 19:35 UTC |
 | **Analyst** | mella-admin |
-| **Account** | 089110987191 (us-east-1) |
+| **Account** | 0891****7191 (us-east-1) |
 | **Status** | Closed — no compromise |
 
 > **Training exercise.** All activity was generated deliberately by the account
@@ -90,10 +90,10 @@ immediately after an event sees an incomplete picture.
 eventTime    : 2026-08-09T19:10:44Z
 eventName    : AssumeRole
 eventSource  : sts.amazonaws.com
-userIdentity : arn:aws:iam::089110987191:user/mella-admin
+userIdentity : arn:aws:iam::0891****7191:user/mella-admin
 sourceIP     : 50.211.153.xxx          (redacted — analyst's own address)
 userAgent    : aws-cli/2.36.17 ... md/command#sts.assume-role
-roleArn      : arn:aws:iam::089110987191:role/cloudsec-lab-incident-01-analyst
+roleArn      : arn:aws:iam::0891****7191:role/cloudsec-lab-incident-01-analyst
 sessionName  : incident-01-test
 expiration   : 2026-08-09T20:10:44Z
 ```
@@ -101,7 +101,7 @@ expiration   : 2026-08-09T20:10:44Z
 All subsequent actions are attributed to:
 
 ```
-arn:aws:sts::089110987191:assumed-role/cloudsec-lab-incident-01-analyst/incident-01-test
+arn:aws:sts::0891****7191:assumed-role/cloudsec-lab-incident-01-analyst/incident-01-test
 ```
 
 The **session name is the thread the entire investigation hangs on.** A single
@@ -114,7 +114,7 @@ eventTime : 2026-08-09T19:11:03Z
 eventName : CreateAccessKey
 errorCode : AccessDenied
 errorMessage:
-  User: arn:aws:sts::089110987191:assumed-role/cloudsec-lab-incident-01-analyst/incident-01-test
+  User: arn:aws:sts::0891****7191:assumed-role/cloudsec-lab-incident-01-analyst/incident-01-test
   is not authorized to perform: iam:CreateAccessKey on resource: user mella-admin
   because no identity-based policy allows the iam:CreateAccessKey action
 ```
@@ -129,7 +129,7 @@ errorMessage:
 Data event retrieval:
 
 ```powershell
-aws s3 cp s3://cloudsec-lab-cloudtrail-089110987191/AWSLogs/089110987191/CloudTrail/us-east-1/2026/08/09/ . --recursive
+aws s3 cp s3://cloudsec-lab-cloudtrail-0891****7191/AWSLogs/0891****7191/CloudTrail/us-east-1/2026/08/09/ . --recursive
 gunzip *.gz
 # filter Records[] where eventCategory == "Data"
 ```
@@ -204,12 +204,12 @@ at the time are unrecoverable.
 | --- | --- | --- |
 | IAM role | `cloudsec-lab-incident-01-analyst` | Assumed; used within and beyond intended scope |
 | IAM user | `mella-admin` | **Target** of the escalation attempt; not modified |
-| S3 bucket | `cloudsec-lab-incident-01-089110987191` | 2 objects read; 1 read attempt denied |
+| S3 bucket | `cloudsec-lab-incident-01-0891****7191` | 2 objects read; 1 read attempt denied |
 | S3 object | `reports/quarterly-summary.txt` | Read (synthetic data) |
 | S3 object | `reports/runbook.txt` | Read; delete attempt denied |
 | S3 object | `restricted/payroll.txt` | Read attempt **denied** |
 | CloudTrail | `cloudsec-lab-trail` | Recorded the activity |
-| S3 log bucket | `cloudsec-lab-cloudtrail-089110987191` | Evidence store |
+| S3 log bucket | `cloudsec-lab-cloudtrail-0891****7191` | Evidence store |
 
 **No resource was modified, deleted, or created by the actor.** No IAM
 credentials were issued. No data left the account.
