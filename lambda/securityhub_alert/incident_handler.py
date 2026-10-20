@@ -14,6 +14,17 @@ respond pipeline; automated remediation is a later phase. Keeping it read-only
 means a bad event pattern produces noise in a log group rather than an
 unwanted change to account state.
 
+Extension: every alerted finding also publishes a short message to
+NOTIFY_TOPIC_ARN via SNS. Unlike the containment handler's narrow,
+four-outcome notification list, every finding that reaches this function is
+already the thing worth a human's attention - that is what ALERT_SEVERITIES
+and the EventBridge pattern upstream are for - so there is no separate
+notify-worthy subset to compute here. This exists specifically to cover
+finding types (like Incident 01's denied iam:CreateAccessKey pattern) that
+reach HIGH/CRITICAL severity but have no automated remedy at all: a human
+being told is the entire response. A notify failure is caught and logged,
+never raised, the same discipline containment_handler.py already follows.
+
 Event shape (EventBridge, detail-type "Security Hub Findings - Imported"):
 
     { "detail": { "findings": [ <ASFF finding>, ... ] } }
@@ -26,6 +37,8 @@ import json
 import logging
 import os
 
+import boto3
+
 LOG = logging.getLogger()
 LOG.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
@@ -37,7 +50,25 @@ ALERT_SEVERITIES = {
     if s.strip()
 }
 
+# Extension: where every alerted finding gets published. Empty string (not
+# None) is the safe default - _notify() treats a blank topic ARN as "not
+# configured" and skips the publish call rather than letting boto3 raise on
+# an empty resource, same convention containment_handler.py uses.
+NOTIFY_TOPIC_ARN = os.environ.get("NOTIFY_TOPIC_ARN", "").strip()
+
 UNKNOWN = "<unknown>"
+
+_sns = None
+
+
+def _sns_client():
+    """Lazy, module-level client - built once per execution environment,
+    and easy to replace with a fake in tests by setting the module's `_sns`
+    global directly. Same pattern as containment_handler.py's _sns_client()."""
+    global _sns
+    if _sns is None:
+        _sns = boto3.client("sns")
+    return _sns
 
 
 def _matching(findings):
@@ -129,6 +160,43 @@ def _report(finding):
     return "\n".join(lines)
 
 
+def _notify(finding):
+    """Publish a short message to NOTIFY_TOPIC_ARN for one alerted finding.
+    Never raises - a notification failure must not turn an already-logged
+    alert into a crashed invocation."""
+    if not NOTIFY_TOPIC_ARN:
+        return
+
+    severity = (finding.get("Severity") or {}).get("Label", UNKNOWN)
+    subject = f"[cloudsec-lab] {severity} finding: {finding.get('Title', UNKNOWN)}"
+    message = "\n".join(
+        [
+            f"Finding ID:  {finding.get('Id', UNKNOWN)}",
+            f"Finding:     {finding.get('Title', UNKNOWN)}",
+            f"Type:        {_types(finding)}",
+            f"Resource:    {_resources(finding)}",
+            f"Severity:    {severity}",
+        ]
+    )
+
+    try:
+        _sns_client().publish(
+            TopicArn=NOTIFY_TOPIC_ARN,
+            Subject=subject[:100],  # SNS subject is capped at 100 characters
+            Message=message,
+        )
+    except Exception as exc:  # noqa: BLE001 - notification must not crash the handler
+        LOG.warning(
+            json.dumps(
+                {
+                    "alert": "notify_failed",
+                    "id": finding.get("Id"),
+                    "detail": str(exc),
+                }
+            )
+        )
+
+
 def lambda_handler(event, context):
     findings = (event.get("detail") or {}).get("findings") or []
     alerting = _matching(findings)
@@ -147,6 +215,7 @@ def lambda_handler(event, context):
 
     for finding in alerting:
         LOG.warning(_report(finding))
+        _notify(finding)
 
         # Second, compact line for machine consumption. The block above is for
         # a human reading the log stream; this one is what CloudWatch Logs

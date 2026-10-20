@@ -1,14 +1,16 @@
 """Contain one specific, narrowly-scoped S3 misconfiguration when GuardDuty
-(via Security Hub) reports it against a resource this lab explicitly
-allow-lists.
+or an AWS Config-backed Security Hub standards control reports it against a
+resource this lab explicitly allow-lists.
 
 Phase 9. This is the one function in the lab authorized to write to a real
 AWS resource, and every axis of that authorization is deliberately narrow:
 
-  Trigger   One EventBridge rule matching an exact ASFF Types value -
-            GuardDuty's Policy:S3/BucketAnonymousAccessGranted, as it is
-            rendered once imported into Security Hub. Not "any HIGH
-            finding" - see CONTAINABLE_FINDING_TYPES below.
+  Trigger   Two EventBridge rules, each matching an exact, verified ASFF
+            field - GuardDuty's Policy:S3/BucketAnonymousAccessGranted (via
+            Types, see CONTAINABLE_FINDING_TYPES) and, separately, a Config-
+            backed standards control such as S3.1 (via
+            Compliance.SecurityControlId, see
+            CONTAINABLE_SECURITY_CONTROL_IDS below). Not "any HIGH finding".
   Resource  An explicit allowlist of bucket ARNs (CONTAINABLE_RESOURCE_ARNS).
             Not a prefix. A finding against a bucket not on this exact list
             is logged and skipped, never acted on.
@@ -21,11 +23,19 @@ AWS resource, and every axis of that authorization is deliberately narrow:
             or not it was allowed to actually do it.
 
 None of these checks are redundant with each other, or with the EventBridge
-event pattern that invokes this function - see the Phase 9 build notes for
+event patterns that invoke this function - see the Phase 9 build notes for
 why each one exists independently and what happens if any one is removed.
 
+Extension: every actionable outcome (contained, would_contain_but_disabled,
+contain_failed, examine_failed) also publishes a short message to
+NOTIFY_TOPIC_ARN via SNS - the first thing in this lab that reaches a human
+directly rather than only writing a CloudWatch Logs line someone has to go
+looking for. A failure to publish is caught and logged, never raised; it
+must not be able to turn a successful containment decision into a crashed
+invocation.
+
 Event shape - the same Security Hub finding-imported envelope
-incident_handler.py reads, just delivered by a narrower rule:
+incident_handler.py reads, just delivered by narrower rules:
 
     { "detail": { "findings": [ <ASFF finding>, ... ] } }
 """
@@ -62,10 +72,42 @@ CONTAINABLE_RESOURCE_ARNS = {
     a.strip() for a in os.environ.get("CONTAINABLE_RESOURCE_ARNS", "").split(",") if a.strip()
 }
 
+# Extension: Compliance.SecurityControlId values from Config-backed Security
+# Hub standards findings (e.g. "S3.1") - a second, independent match path
+# alongside CONTAINABLE_FINDING_TYPES above, because standards findings
+# identify which control fired through a different ASFF field than
+# GuardDuty findings do. Empty by default - populated only once a real value
+# has been verified against a live finding, same discipline as
+# CONTAINABLE_FINDING_TYPES's own docstring note above.
+CONTAINABLE_SECURITY_CONTROL_IDS = {
+    c.strip()
+    for c in os.environ.get("CONTAINABLE_SECURITY_CONTROL_IDS", "").split(",")
+    if c.strip()
+}
+
 # Off unless explicitly turned on. Terraform's var.enable_auto_containment
 # defaults to false; this mirrors that default so a missing or malformed env
 # var fails closed, not open.
 AUTO_CONTAIN_ENABLED = os.environ.get("AUTO_CONTAIN_ENABLED", "false").strip().lower() == "true"
+
+# Extension: where actionable outcomes get published. Empty string (rather
+# than None) is the safe default if this is ever missing - _notify() treats
+# a blank topic ARN as "notification not configured" and skips the publish
+# call entirely rather than letting boto3 raise on an empty resource.
+NOTIFY_TOPIC_ARN = os.environ.get("NOTIFY_TOPIC_ARN", "").strip()
+
+# Outcomes worth a human's attention: a real action, a real decision not to
+# act (because the switch is off), or a real failure. Deliberately excludes
+# the routine skip_* outcomes and already_contained - those happen on every
+# finding Security Hub imports that isn't relevant here, and paging a human
+# for "not relevant" would make the signal worth reading disappear into
+# noise.
+_NOTIFY_ACTIONS = {
+    "contained",
+    "would_contain_but_disabled",
+    "contain_failed",
+    "examine_failed",
+}
 
 _BLOCK_KEYS = (
     "BlockPublicAcls",
@@ -75,6 +117,7 @@ _BLOCK_KEYS = (
 )
 
 _s3 = None
+_sns = None
 
 
 def _s3_client():
@@ -85,6 +128,14 @@ def _s3_client():
     if _s3 is None:
         _s3 = boto3.client("s3")
     return _s3
+
+
+def _sns_client():
+    """Same lazy, replaceable-in-tests pattern as _s3_client() above."""
+    global _sns
+    if _sns is None:
+        _sns = boto3.client("sns")
+    return _sns
 
 
 def _s3_bucket_resource(finding):
@@ -129,6 +180,55 @@ def _log(action, finding, bucket_arn=None, detail=None):
             }
         )
     )
+    _notify(action, finding, bucket_arn=bucket_arn, detail=detail)
+
+
+def _notify(action, finding, bucket_arn=None, detail=None):
+    """Publish a short message to NOTIFY_TOPIC_ARN for actionable outcomes
+    only (see _NOTIFY_ACTIONS). Never raises - a notification failure must
+    not turn an already-decided containment outcome into a crashed
+    invocation, the same "must not crash the handler" discipline every
+    other step in this file follows.
+
+    Deliberately called from _log() rather than scattered across each
+    return point in _handle_one() - every call to _log() already carries
+    exactly the fields a message needs, and it keeps "which outcomes get
+    logged" and "which outcomes get notified" impossible to let drift out
+    of sync with each other by construction.
+    """
+    if action not in _NOTIFY_ACTIONS or not NOTIFY_TOPIC_ARN:
+        return
+
+    control_id = (finding.get("Compliance") or {}).get("SecurityControlId")
+    subject = f"[cloudsec-lab] S3 containment: {action}"
+    message = "\n".join(
+        [
+            f"Action:      {action}",
+            f"Finding ID:  {finding.get('Id', 'unknown')}",
+            f"Type/Control:{' ' + control_id if control_id else ' ' + str(finding.get('Types'))}",
+            f"Bucket:      {bucket_arn or 'unknown'}",
+            f"Auto-contain:{' enabled' if AUTO_CONTAIN_ENABLED else ' disabled (dry-run)'}",
+            f"Detail:      {detail or ''}",
+        ]
+    )
+
+    try:
+        _sns_client().publish(
+            TopicArn=NOTIFY_TOPIC_ARN,
+            Subject=subject[:100],  # SNS subject is capped at 100 characters
+            Message=message,
+        )
+    except Exception as exc:  # noqa: BLE001 - notification must not crash the handler
+        LOG.warning(
+            json.dumps(
+                {
+                    "containment_action": "notify_failed",
+                    "finding_id": finding.get("Id"),
+                    "original_action": action,
+                    "detail": str(exc),
+                }
+            )
+        )
 
 
 def _handle_one(finding):
@@ -137,7 +237,12 @@ def _handle_one(finding):
     one bad finding in a batch can't take the rest down with it."""
 
     finding_types = set(finding.get("Types") or [])
-    if not (finding_types & CONTAINABLE_FINDING_TYPES):
+    security_control_id = (finding.get("Compliance") or {}).get("SecurityControlId")
+
+    type_matches = bool(finding_types & CONTAINABLE_FINDING_TYPES)
+    control_matches = security_control_id in CONTAINABLE_SECURITY_CONTROL_IDS
+
+    if not (type_matches or control_matches):
         _log("skipped_unknown_type", finding)
         return "skipped_unknown_type"
 
@@ -171,14 +276,11 @@ def _handle_one(finding):
         # missing attribute on the exceptions factory raises its own
         # AttributeError that is NOT caught by the `except Exception` below,
         # since it happens while Python is still evaluating *this* except
-        # clause's type, not inside the try block. That crashed every real
-        # invocation of this handler in Phase 10's live fire-drill - every
-        # GetPublicAccessBlock error, including an unrelated AccessDenied
-        # from an IAM action-name typo (fixed alongside this), was silently
-        # turned into an unhandled exception instead of a graceful
-        # examine_failed log line. Matching on the string error code is
-        # stable across botocore versions because it's part of the AWS API
-        # contract, not generated Python.
+        # clause's type, not inside the try block - a real AccessDenied (or
+        # any other ClientError) would then escape as an unhandled crash
+        # instead of a graceful examine_failed log line. Matching on the
+        # string error code instead is stable across botocore versions
+        # because it's part of the AWS API contract, not generated Python.
         if exc.response.get("Error", {}).get("Code") == "NoSuchPublicAccessBlockConfiguration":
             already_blocked = False
         else:

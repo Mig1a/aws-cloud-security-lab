@@ -38,9 +38,8 @@ resource "aws_cloudwatch_event_target" "containment_lambda" {
   # This only covers EventBridge failing to INVOKE the Lambda (e.g. the
   # permission below being wrong or missing) - it does not see the function
   # being invoked successfully and then erroring out internally. That second
-  # failure mode is real (Phase 10 hit it) and is covered separately by
-  # containment_lambda.tf's dead_letter_config on the function itself, which
-  # shares this same queue.
+  # failure mode is covered separately by containment_lambda.tf's
+  # dead_letter_config on the function itself, which shares this same queue.
   retry_policy {
     maximum_event_age_in_seconds = 3600
     maximum_retry_attempts       = 3
@@ -85,10 +84,19 @@ data "aws_iam_policy_document" "containment_dlq" {
 
     resources = [aws_sqs_queue.containment_dlq.arn]
 
+    # Both containment rules share this one DLQ (this file's GuardDuty-sourced
+    # rule, and containment_standards_eventbridge.tf's Config/standards-sourced
+    # rule) - the source ARN allowlist has to include both, or the second
+    # rule's failed deliveries are denied here rather than landing anywhere
+    # visible. The standards rule only exists (count > 0) once a real
+    # SecurityControlId has been verified and configured - see its own file.
     condition {
       test     = "ArnEquals"
       variable = "aws:SourceArn"
-      values   = [aws_cloudwatch_event_rule.s3_anonymous_access.arn]
+      values = concat(
+        [aws_cloudwatch_event_rule.s3_anonymous_access.arn],
+        length(var.containable_security_control_ids) > 0 ? [aws_cloudwatch_event_rule.s3_standards_containment[0].arn] : []
+      )
     }
   }
 }

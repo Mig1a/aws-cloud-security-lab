@@ -35,9 +35,9 @@ KNOWN_TYPE = "TTPs/Policy:S3-BucketAnonymousAccessGranted"
 
 def client_error(code, operation="GetPublicAccessBlock", message="boom"):
     """A real botocore.exceptions.ClientError, not a hand-rolled stand-in -
-    see the regression test below for why that distinction is the whole
-    point: Phase 10's live fire-drill was silently broken by code that
-    assumed a different, hand-rolled fake's shape rather than this one."""
+    see the regression test below for why that distinction matters: a fake
+    that defines whatever attribute the code expects, unconditionally,
+    hides exactly the version-dependent bugs a real client would surface."""
     return ClientError({"Error": {"Code": code, "Message": message}}, operation)
 
 
@@ -76,8 +76,17 @@ class FakeS3Client:
         self.blocked_buckets.add(Bucket)
 
 
-def finding(types, resources, finding_id="finding-1", updated_at="2026-08-16T12:00:00.000Z"):
-    return {"Id": finding_id, "Types": types, "Resources": resources, "UpdatedAt": updated_at}
+def finding(
+    types,
+    resources,
+    finding_id="finding-1",
+    updated_at="2026-08-16T12:00:00.000Z",
+    security_control_id=None,
+):
+    result = {"Id": finding_id, "Types": types, "Resources": resources, "UpdatedAt": updated_at}
+    if security_control_id is not None:
+        result["Compliance"] = {"SecurityControlId": security_control_id}
+    return result
 
 
 def iam_key_resource(key_id="AKIAEXAMPLE"):
@@ -92,6 +101,23 @@ def event(*findings):
     return {"detail": {"findings": list(findings)}}
 
 
+class FakeSNSClient:
+    """Enough of boto3's SNS client surface for this handler, nothing more -
+    same minimal, real-exception philosophy as FakeS3Client above:
+    raise_on_publish is a real ClientError, never a hand-rolled stand-in, so
+    a test asserting the handler survives an SNS failure actually proves
+    that against the real exception shape."""
+
+    def __init__(self, raise_on_publish=None):
+        self.raise_on_publish = raise_on_publish
+        self.publish_calls = []
+
+    def publish(self, TopicArn, Subject, Message):
+        self.publish_calls.append((TopicArn, Subject, Message))
+        if self.raise_on_publish:
+            raise self.raise_on_publish
+
+
 def use_fake_s3(test, **kwargs):
     """Install a fresh FakeS3Client as the module's client and guarantee it's
     torn down even if the test raises."""
@@ -101,9 +127,24 @@ def use_fake_s3(test, **kwargs):
     return fake
 
 
+def use_fake_sns(test, **kwargs):
+    """Same pattern as use_fake_s3 above, for the SNS client."""
+    fake = FakeSNSClient(**kwargs)
+    handler._sns = fake
+    test.addCleanup(setattr, handler, "_sns", None)
+    return fake
+
+
 class ContainmentTestCase(unittest.TestCase):
     """Base class fixing CONTAINABLE_RESOURCE_ARNS/AUTO_CONTAIN_ENABLED to
-    known values for the duration of each test, restored afterwards."""
+    known values for the duration of each test, restored afterwards.
+
+    NOTIFY_TOPIC_ARN is left at its real, parsed-from-environment value
+    (empty string outside Lambda) rather than fixed here - tests that care
+    about notification behaviour set it explicitly, so every other test in
+    this file is proof that nothing about containment itself depends on
+    notification being configured at all.
+    """
 
     def setUp(self):
         self._patches = [
@@ -183,23 +224,19 @@ class TestExamineStep(ContainmentTestCase):
         self.assertEqual(fake.put_calls, [])
 
     def test_access_denied_on_examine_is_logged_not_crashed(self):
-        """Regression test for Phase 10's live fire-drill: the deployed IAM
-        policy granted the wrong action names (s3:GetPublicAccessBlock
-        instead of the real s3:GetBucketPublicAccessBlock), so every real
-        invocation hit AccessDenied here. The handler's own exception
-        matching made this worse, not better - `except
-        _s3_client().exceptions.NoSuchPublicAccessBlockConfiguration` raised
-        its own AttributeError on this runtime's botocore (see
-        containment_handler.py), which is not caught by `except Exception`
-        and crashed the whole invocation instead of logging
-        examine_failed. The bucket sat publicly exposed for about four days
-        before anyone (anything) noticed - a crash neither EventBridge's
-        target-level DLQ nor the function's own retries made visible,
-        because the Lambda WAS successfully invoked each time; it just
-        failed once inside. A hand-rolled fake exception class previously
-        in this file could never have caught this - it always defined the
-        exact attribute the code expected, which is exactly backwards from
-        what a real, version-dependent botocore client does."""
+        """A real AccessDenied on the examine step (e.g. from a misconfigured
+        IAM policy) must produce a graceful `examine_failed` log line, not an
+        unhandled crash. The handler's exception matching is deliberately
+        `except ClientError` + a string error-code check rather than
+        `except _s3_client().exceptions.NoSuchPublicAccessBlockConfiguration`
+        - that dynamically-generated attribute is not guaranteed to exist on
+        every botocore version bundled with a given Lambda runtime, and
+        accessing a missing one raises its own AttributeError that `except
+        Exception` cannot catch (it happens while evaluating the except
+        clause's type, not inside the try). A hand-rolled fake exception
+        class that always defines the exact attribute the code expects would
+        never catch a regression here - which is why this suite's fakes
+        raise a real `botocore.exceptions.ClientError` instead."""
         fake = use_fake_s3(self, raise_on_get=client_error("AccessDenied"))
         result = handler.lambda_handler(
             event(finding([KNOWN_TYPE], [s3_bucket_resource(ALLOWED_ARN)])), None
@@ -286,6 +323,146 @@ class TestLogging(ContainmentTestCase):
         self.assertIs(payload["auto_contain_enabled"], True)
 
 
+class TestSecurityControlIdMatch(ContainmentTestCase):
+    """Extension: a Config-backed standards finding identifies its control
+    via Compliance.SecurityControlId, a completely different ASFF field
+    from the GuardDuty-sourced Types this handler already matched on - this
+    is the second, independent match path, not a replacement for the first.
+    """
+
+    def setUp(self):
+        super().setUp()
+        p = patch.object(handler, "CONTAINABLE_SECURITY_CONTROL_IDS", {"S3.1"})
+        p.start()
+        self.addCleanup(p.stop)
+
+    def test_matching_security_control_id_is_contained_without_a_types_match(self):
+        fake = use_fake_s3(self)
+        result = handler.lambda_handler(
+            event(
+                finding(
+                    ["Software and Configuration Checks/Industry and Regulatory Standards"],
+                    [s3_bucket_resource(ALLOWED_ARN)],
+                    security_control_id="S3.1",
+                )
+            ),
+            None,
+        )
+        self.assertEqual(result["results"], ["contained"])
+        self.assertEqual(len(fake.put_calls), 1)
+
+    def test_unlisted_security_control_id_with_unrelated_types_is_skipped(self):
+        fake = use_fake_s3(self)
+        result = handler.lambda_handler(
+            event(
+                finding(
+                    ["Software and Configuration Checks/Industry and Regulatory Standards"],
+                    [s3_bucket_resource(ALLOWED_ARN)],
+                    security_control_id="S3.2",
+                )
+            ),
+            None,
+        )
+        self.assertEqual(result["results"], ["skipped_unknown_type"])
+        self.assertEqual(fake.get_calls, [])
+
+
+class TestNotifications(ContainmentTestCase):
+    """Extension: the only part of this lab's pipeline that ever reaches a
+    human directly rather than only CloudWatch Logs. Notification must be
+    exactly as narrow as the containment decision itself - fired for real
+    outcomes, silent for routine skips, and never able to crash the
+    handler on its own.
+    """
+
+    TOPIC_ARN = "arn:aws:sns:us-east-1:123456789012:test-security-alerts"
+
+    def setUp(self):
+        super().setUp()
+        p = patch.object(handler, "NOTIFY_TOPIC_ARN", self.TOPIC_ARN)
+        p.start()
+        self.addCleanup(p.stop)
+
+    def test_contained_publishes_one_notification(self):
+        use_fake_s3(self)
+        fake_sns = use_fake_sns(self)
+        handler.lambda_handler(
+            event(finding([KNOWN_TYPE], [s3_bucket_resource(ALLOWED_ARN)])), None
+        )
+        self.assertEqual(len(fake_sns.publish_calls), 1)
+        topic_arn, subject, message = fake_sns.publish_calls[0]
+        self.assertEqual(topic_arn, self.TOPIC_ARN)
+        self.assertIn("contained", subject)
+        self.assertIn(ALLOWED_ARN, message)
+
+    def test_would_contain_but_disabled_publishes(self):
+        use_fake_s3(self)
+        fake_sns = use_fake_sns(self)
+        with patch.object(handler, "AUTO_CONTAIN_ENABLED", False):
+            handler.lambda_handler(
+                event(finding([KNOWN_TYPE], [s3_bucket_resource(ALLOWED_ARN)])), None
+            )
+        self.assertEqual(len(fake_sns.publish_calls), 1)
+
+    def test_contain_failed_publishes(self):
+        use_fake_s3(self, raise_on_put=RuntimeError("throttled"))
+        fake_sns = use_fake_sns(self)
+        handler.lambda_handler(
+            event(finding([KNOWN_TYPE], [s3_bucket_resource(ALLOWED_ARN)])), None
+        )
+        self.assertEqual(len(fake_sns.publish_calls), 1)
+
+    def test_examine_failed_publishes(self):
+        use_fake_s3(self, raise_on_get=RuntimeError("boom"))
+        fake_sns = use_fake_sns(self)
+        handler.lambda_handler(
+            event(finding([KNOWN_TYPE], [s3_bucket_resource(ALLOWED_ARN)])), None
+        )
+        self.assertEqual(len(fake_sns.publish_calls), 1)
+
+    def test_routine_skips_do_not_publish(self):
+        """Paging a human for every irrelevant finding Security Hub imports
+        would make the signal worth reading disappear into noise."""
+        use_fake_s3(self)
+        fake_sns = use_fake_sns(self)
+        handler.lambda_handler(
+            event(finding(["Some/Other-Type"], [s3_bucket_resource(ALLOWED_ARN)])), None
+        )
+        self.assertEqual(fake_sns.publish_calls, [])
+
+    def test_already_contained_does_not_publish(self):
+        use_fake_s3(self, blocked_buckets={"test-lab-allowlisted-bucket"})
+        fake_sns = use_fake_sns(self)
+        handler.lambda_handler(
+            event(finding([KNOWN_TYPE], [s3_bucket_resource(ALLOWED_ARN)])), None
+        )
+        self.assertEqual(fake_sns.publish_calls, [])
+
+    def test_unconfigured_topic_arn_never_calls_publish(self):
+        """Default state outside any test override: NOTIFY_TOPIC_ARN is the
+        empty string. _notify() must treat that as "not configured", not
+        attempt a publish call with an empty TopicArn."""
+        use_fake_s3(self)
+        fake_sns = use_fake_sns(self)
+        with patch.object(handler, "NOTIFY_TOPIC_ARN", ""):
+            handler.lambda_handler(
+                event(finding([KNOWN_TYPE], [s3_bucket_resource(ALLOWED_ARN)])), None
+            )
+        self.assertEqual(fake_sns.publish_calls, [])
+
+    def test_publish_failure_is_caught_and_does_not_raise(self):
+        """A notification failure must not be able to turn an already-decided
+        containment outcome into a crashed invocation - the same discipline
+        every other step in this handler already follows."""
+        use_fake_s3(self)
+        use_fake_sns(self, raise_on_publish=client_error("Throttling", operation="Publish"))
+        result = handler.lambda_handler(
+            event(finding([KNOWN_TYPE], [s3_bucket_resource(ALLOWED_ARN)])), None
+        )
+        # The containment outcome itself is unaffected by the notify failure.
+        self.assertEqual(result["results"], ["contained"])
+
+
 class TestEnvironmentWiring(unittest.TestCase):
     """Proves CONTAINABLE_FINDING_TYPES, CONTAINABLE_RESOURCE_ARNS, and
     AUTO_CONTAIN_ENABLED are actually parsed from the environment Terraform
@@ -309,6 +486,8 @@ class TestEnvironmentWiring(unittest.TestCase):
                     "CONTAINABLE_FINDING_TYPES": "Type/A, Type/B",
                     "CONTAINABLE_RESOURCE_ARNS": f"{ALLOWED_ARN}, {OTHER_ARN}",
                     "AUTO_CONTAIN_ENABLED": "TRUE",
+                    "CONTAINABLE_SECURITY_CONTROL_IDS": "S3.1, S3.2",
+                    "NOTIFY_TOPIC_ARN": " arn:aws:sns:us-east-1:123456789012:topic ",
                 },
             ):
                 importlib.reload(handler)
@@ -317,6 +496,12 @@ class TestEnvironmentWiring(unittest.TestCase):
                     handler.CONTAINABLE_RESOURCE_ARNS, {ALLOWED_ARN, OTHER_ARN}
                 )
                 self.assertTrue(handler.AUTO_CONTAIN_ENABLED)
+                self.assertEqual(
+                    handler.CONTAINABLE_SECURITY_CONTROL_IDS, {"S3.1", "S3.2"}
+                )
+                self.assertEqual(
+                    handler.NOTIFY_TOPIC_ARN, "arn:aws:sns:us-east-1:123456789012:topic"
+                )
         finally:
             importlib.reload(handler)
 
@@ -326,6 +511,8 @@ class TestEnvironmentWiring(unittest.TestCase):
         )
         self.assertEqual(handler.CONTAINABLE_RESOURCE_ARNS, set())
         self.assertFalse(handler.AUTO_CONTAIN_ENABLED)
+        self.assertEqual(handler.CONTAINABLE_SECURITY_CONTROL_IDS, set())
+        self.assertEqual(handler.NOTIFY_TOPIC_ARN, "")
 
     def test_missing_auto_contain_env_var_fails_closed(self):
         import importlib

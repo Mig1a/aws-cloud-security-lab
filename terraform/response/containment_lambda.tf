@@ -84,14 +84,13 @@ resource "aws_iam_role_policy" "containment_logs" {
 #
 # Distinct from containment_eventbridge.tf's rule-target DLQ, which only
 # catches EventBridge failing to INVOKE this function at all (e.g. the
-# lambda:InvokeFunction permission below being missing). Phase 10's live
-# fire-drill found the gap this closes: the function WAS invoked
-# successfully three times (EventBridge's retry_policy below) and crashed
-# inside all three - a failure mode the rule-target DLQ cannot see, because
-# from EventBridge's point of view the invoke succeeded every time. Lambda's
-# own asynchronous-invocation dead_letter_config is what catches "invoked
-# fine, then the function itself errored out after every retry" - the one
-# this phase actually hit, which until now went to the same place every
+# lambda:InvokeFunction permission below being missing). It cannot see a
+# different failure mode: the function being invoked successfully
+# (EventBridge's retry_policy below exhausted) and erroring out inside every
+# attempt - from EventBridge's point of view the invoke succeeded every
+# time. Lambda's own asynchronous-invocation dead_letter_config is what
+# catches "invoked fine, then the function itself errored out after every
+# retry," which would otherwise go to the same place every
 # `would_contain_but_disabled` dry-run log line goes when nothing is wrong:
 # nowhere visible.
 data "aws_iam_policy_document" "containment_dlq_send" {
@@ -121,11 +120,10 @@ resource "aws_iam_role_policy" "containment_dlq_send" {
 # name. This is the actual IAM action name AWS exposes for this API (matching
 # the CloudTrail eventName and what shows up in an AccessDenied message), NOT
 # the boto3/botocore client method name (s3api get/put-public-access-block,
-# no "Bucket"). The two were out of sync here for the whole life of Phase 9 -
-# every real invocation of this role got AccessDenied, invisibly, because the
-# policy granted an action name that doesn't exist. Found during Phase 10's
-# live fire-drill: see docs/phase-9-automated-containment.md's postmortem
-# note and incidents/incident-03-automated-containment.md.
+# no "Bucket"). Worth stating explicitly: granting the client method name
+# instead produces no error at plan time or apply time - IAM accepts any
+# string that looks like an action name - only a real invocation reveals the
+# mismatch, via AccessDenied. See docs/phase-9-automated-containment.md §4.
 data "aws_iam_policy_document" "containment_s3" {
   count = length(local.containable_resource_arns) > 0 ? 1 : 0
 
@@ -174,6 +172,12 @@ resource "aws_lambda_function" "containment" {
       CONTAINABLE_FINDING_TYPES = join(",", var.containable_finding_types)
       CONTAINABLE_RESOURCE_ARNS = join(",", local.containable_resource_arns)
       AUTO_CONTAIN_ENABLED      = tostring(var.enable_auto_containment)
+
+      # Extension: standards-based containment + SNS notification. Same
+      # drift-proofing as above - read from the same variable that builds
+      # containment_standards_eventbridge.tf's event pattern.
+      CONTAINABLE_SECURITY_CONTROL_IDS = join(",", var.containable_security_control_ids)
+      NOTIFY_TOPIC_ARN                 = aws_sns_topic.security_alerts.arn
     }
   }
 

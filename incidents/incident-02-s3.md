@@ -86,21 +86,51 @@ Security Hub is enabled with 98 AWS Foundational Security Best Practices
 controls, including `S3.1`, `S3.2`, `S3.3`, `S3.5` and `S3.8` — all directly
 relevant here.
 
-**It produced zero findings.**
+**At the time of this incident, it produced zero findings.**
 
-Those controls are evaluated by AWS Config rules, and **AWS Config is not
-enabled** in this account — a deliberate cost decision from
-[Phase 4](../docs/phase-4-detection-services.md), since Config has no free tier
-and bills per configuration item. Verified during this exercise:
+Those controls are evaluated by AWS Config rules, and AWS Config was not
+enabled in this account at the time — not a fully-informed trade-off so much
+as not yet understanding that Security Hub doesn't evaluate most standards
+controls itself at all: it only *aggregates* findings that Config (for these
+controls) or GuardDuty (for behavioral ones) already produced. Verified during
+this exercise:
 
 ```
 aws configservice describe-configuration-recorders  ->  (empty)
 aws securityhub get-findings --filters ResourceType=AwsS3Bucket  ->  0
 ```
 
-The controls report *enabled* while detecting nothing. **An enabled control is
-not the same as a working control** — that gap is the most transferable lesson
-in this incident.
+The controls reported *enabled* while detecting nothing. **An enabled control
+is not the same as a working control** — that gap was the most transferable
+lesson in this incident, and it has since been closed for real: AWS Config
+was turned on (scoped to `AWS::S3::Bucket` only, to keep the known cost risk
+bounded — see [Phase 4 §6](../docs/phase-4-detection-services.md#6-cost)), and
+re-running this exact exposure against this same bucket now produces a real,
+live finding instead of silence:
+
+```
+$ aws securityhub get-findings --filters ComplianceSecurityControlId=S3.2,ResourceId=<this bucket>
+{
+  "Title": "S3 general purpose buckets should block public read access",
+  "Compliance": { "Status": "FAILED", "SecurityControlId": "S3.2" },
+  "Severity": { "Label": "CRITICAL" },
+  "FirstObservedAt": "2026-10-18T19:53:19.410Z",
+  "UpdatedAt": "2026-10-18T19:54:03.151Z"
+}
+```
+
+One more thing worth recording honestly: hundreds of Security Hub's own
+managed Config rules (named `securityhub-*`, one per control) were already
+sitting in this account's Config Rules list before this — visible via
+`aws configservice describe-config-rules` — provisioned automatically by
+Security Hub's control-evaluation engine, but with nothing to evaluate
+against until this account had its own Configuration Recorder. Turning
+Config on didn't require writing new detection logic; it supplied the one
+missing ingredient a system that was already half-built needed to actually
+run. `S3.1`, `S3.3`, and `S3.8` — the rest of the "block public access"
+control family — were verified the same way shortly after, and are now the
+exact finding types [Phase 9's containment Lambda](../docs/phase-9-automated-containment.md)
+acts on for this bucket.
 
 ### Exposure confirmed independently
 
@@ -344,11 +374,23 @@ that lose evidence produce confident, incomplete timelines.
 | 2 | Add `s3-posture-check.ps1` to the detection catalogue | **Done** |
 | 3 | Run the posture check before every commit that touches S3 | Open |
 | 4 | Make the CloudTrail parser tolerate case-duplicate keys | Open |
-| 5 | Decide on AWS Config — cost vs. losing Security Hub S3 coverage | Open |
-| 6 | Alert on `PutBucketPolicy` and `PutBucketPublicAccessBlock` in near real time | Open |
+| 5 | Decide on AWS Config — cost vs. losing Security Hub S3 coverage | **Done** — enabled, scoped to `AWS::S3::Bucket` only |
+| 6 | Alert on `PutBucketPolicy` and `PutBucketPublicAccessBlock` in near real time | Partially addressed |
 
-Item 6 matters most: detection here was a manual scan. In a real account the
-2m23s window would only have been that short by luck.
+Item 5: Config is on, and Security Hub's `S3.1`/`S3.2`/`S3.3`/`S3.8` controls
+now produce real findings for this bucket instead of silence — see §2 above.
+[Phase 9's containment Lambda](../docs/phase-9-automated-containment.md) now
+also acts on all four automatically, restoring Block Public Access within
+minutes of a real finding landing.
+
+Item 6 is only partially closed by that, not fully: this path still goes
+*through* Security Hub/Config, with the same few-minutes evaluation latency
+observed elsewhere in this lab (not the sub-second reaction a direct
+CloudTrail-driven rule watching `PutBucketPolicy` itself would give). A
+manual scan happened to catch the original 2m23s exposure that quickly by
+luck; this is faster and automatic, but still not instant. A CloudTrail-native
+rule that doesn't depend on a Security Hub finding existing first remains on
+the [detection backlog](../detections/README.md#backlog).
 
 ---
 

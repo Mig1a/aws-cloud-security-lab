@@ -36,6 +36,11 @@ output "console_links" {
   }
 }
 
+output "config_enabled" {
+  description = "Whether AWS Config is recording. When true, scoped to AWS::S3::Bucket only - see config.tf."
+  value       = var.enable_config
+}
+
 output "cost_note" {
   description = "Standing cost reminder for the detection stack."
   value       = "GuardDuty and Security Hub free trials both start on enable and run 30 days. This stack is long-lived by design - do NOT destroy it between sessions, but do review spend before the trials end."

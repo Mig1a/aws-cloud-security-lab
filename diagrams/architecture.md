@@ -57,14 +57,19 @@ flowchart TB
 does* — three independent pillars (compute, storage, identity) that all
 produce activity. Everything from `CloudTrail` down is *one linear
 pipeline* that turns that activity into a decision: log it (always), or, for
-exactly one known finding type against exactly one known resource, also fix
-it. That narrowing — three sources, one pipeline, one narrow action at the
-end — is deliberate; see
+two independently-verified trigger families against exactly one known
+resource, also fix it. That narrowing — three sources, one pipeline, one
+narrow action at the end, widened only after each new trigger is verified
+against a real finding — is deliberate; see
 [docs/phase-9-automated-containment.md §1](../docs/phase-9-automated-containment.md#1-the-scope-decision)
-for why "fix it" never widens past that one case.
+and [§11](../docs/phase-9-automated-containment.md#11-extension--a-second-trigger-family-and-notification)
+for how "fix it" grew from one case to four without widening the action
+itself.
 
-**What actually went live, once:**
-[incidents/incident-03-automated-containment.md](../incidents/incident-03-automated-containment.md)
-walks this exact diagram end to end against a real event — including the
-~94 hours the last arrow (`Lambda → Automated Response`) silently failed to
-complete before anyone noticed.
+**What actually went live:** both trigger families have been proven against
+the real account, not just unit-tested — GuardDuty's anonymous-access
+finding, and the AWS Config-backed `S3.1`/`S3.2`/`S3.3`/`S3.8` "block public
+access" family, each confirmed with a real or synthetic finding, a real
+`PutBucketPublicAccessBlock` call, and the bucket's resulting state
+independently re-checked via the live S3 API — see
+[docs/phase-9-automated-containment.md §11](../docs/phase-9-automated-containment.md#11-extension--a-second-trigger-family-and-notification).

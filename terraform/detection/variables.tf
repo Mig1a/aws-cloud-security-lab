@@ -106,3 +106,29 @@ variable "security_hub_auto_enable_controls" {
   type        = bool
   default     = true
 }
+
+# --- AWS Config ---------------------------------------------------------------
+
+variable "enable_config" {
+  description = <<-EOT
+    Master switch for AWS Config (config.tf). Off by default.
+
+    Most Security Hub standards controls (S3.1, S3.2, S3.3, S3.5, S3.8 among
+    them) are evaluated by Config rules and report "No data" without it - see
+    incidents/incident-02-s3.md. Config has no free tier and bills per
+    configuration item recorded, so this stays an explicit opt-in rather than
+    something enabled by default alongside GuardDuty/Security Hub.
+
+    When true, the recorder is scoped to AWS::S3::Bucket only (config.tf) -
+    never "all supported resource types" - to keep the billing surface bounded
+    to the one thing this lab actually needed Config for.
+  EOT
+  type        = bool
+  default     = false
+}
+
+variable "config_s3_key_prefix" {
+  description = "Prefix under the existing CloudTrail bucket where Config delivers its snapshots. Keeps Config's objects clearly separated from CloudTrail's own AWSLogs/ prefix in the same bucket."
+  type        = string
+  default     = "config"
+}

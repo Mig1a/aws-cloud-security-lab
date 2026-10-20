@@ -96,6 +96,11 @@ resource "aws_lambda_function" "alert" {
       # Same list that builds the event pattern, so the function's second-pass
       # filter cannot drift from the rule that invoked it.
       ALERT_SEVERITIES = join(",", var.alert_severity_labels)
+
+      # Extension: every alerted finding also publishes to this same topic
+      # the containment Lambda uses (notifications.tf) - one shared SNS
+      # topic for every email this lab sends, rather than one per Lambda.
+      NOTIFY_TOPIC_ARN = aws_sns_topic.security_alerts.arn
     }
   }
 

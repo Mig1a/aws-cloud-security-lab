@@ -50,6 +50,29 @@ def event(*findings):
     return {"detail": {"findings": list(findings)}}
 
 
+class FakeSNSClient:
+    """Enough of boto3's SNS client surface for this handler, nothing more -
+    same minimal, real-exception philosophy as containment_handler's test
+    fakes: raise_on_publish is a real botocore.exceptions.ClientError, never
+    a hand-rolled stand-in."""
+
+    def __init__(self, raise_on_publish=None):
+        self.raise_on_publish = raise_on_publish
+        self.publish_calls = []
+
+    def publish(self, TopicArn, Subject, Message):
+        self.publish_calls.append((TopicArn, Subject, Message))
+        if self.raise_on_publish:
+            raise self.raise_on_publish
+
+
+def use_fake_sns(test, **kwargs):
+    fake = FakeSNSClient(**kwargs)
+    handler._sns = fake
+    test.addCleanup(setattr, handler, "_sns", None)
+    return fake
+
+
 class TestSeverityFilter(unittest.TestCase):
     def test_high_alerts(self):
         result = handler.lambda_handler(event(finding("HIGH")), None)
@@ -185,6 +208,62 @@ class TestReportFormat(unittest.TestCase):
         self.assertEqual(payloads[0]["resources"], ["arn:aws:s3:::b"])
 
 
+class TestNotifications(unittest.TestCase):
+    """Extension: unlike containment_handler's narrow four-outcome notify
+    list, every finding that reaches this handler is already the filtered,
+    alert-worthy set - so notification here has no further outcome-based
+    gating of its own, only the NOTIFY_TOPIC_ARN-configured check."""
+
+    TOPIC_ARN = "arn:aws:sns:us-east-1:123456789012:test-security-alerts"
+
+    def setUp(self):
+        p = patch.object(handler, "NOTIFY_TOPIC_ARN", self.TOPIC_ARN)
+        p.start()
+        self.addCleanup(p.stop)
+
+    def test_alerted_finding_publishes_one_notification(self):
+        fake = use_fake_sns(self)
+        handler.lambda_handler(event(finding("HIGH", "Public S3 bucket")), None)
+        self.assertEqual(len(fake.publish_calls), 1)
+        topic_arn, subject, message = fake.publish_calls[0]
+        self.assertEqual(topic_arn, self.TOPIC_ARN)
+        self.assertIn("HIGH", subject)
+        self.assertIn("Public S3 bucket", message)
+
+    def test_below_threshold_finding_does_not_publish(self):
+        fake = use_fake_sns(self)
+        handler.lambda_handler(event(finding("LOW")), None)
+        self.assertEqual(fake.publish_calls, [])
+
+    def test_mixed_batch_publishes_only_for_the_alerted_one(self):
+        fake = use_fake_sns(self)
+        handler.lambda_handler(
+            event(finding("INFORMATIONAL", "noise"), finding("CRITICAL", "the-real-one")),
+            None,
+        )
+        self.assertEqual(len(fake.publish_calls), 1)
+        self.assertIn("the-real-one", fake.publish_calls[0][2])
+
+    def test_unconfigured_topic_arn_never_calls_publish(self):
+        fake = use_fake_sns(self)
+        with patch.object(handler, "NOTIFY_TOPIC_ARN", ""):
+            handler.lambda_handler(event(finding("HIGH")), None)
+        self.assertEqual(fake.publish_calls, [])
+
+    def test_publish_failure_is_caught_and_does_not_raise(self):
+        from botocore.exceptions import ClientError
+
+        use_fake_sns(
+            self,
+            raise_on_publish=ClientError(
+                {"Error": {"Code": "Throttling", "Message": "boom"}}, "Publish"
+            ),
+        )
+        result = handler.lambda_handler(event(finding("HIGH")), None)
+        # The alert outcome itself is unaffected by the notify failure.
+        self.assertEqual(result, {"received": 1, "alerted": 1})
+
+
 class TestEnvironmentOverride(unittest.TestCase):
     def test_alert_severities_env_var_is_honoured(self):
         """Terraform sets this from the same list that builds the event
@@ -211,6 +290,22 @@ class TestEnvironmentOverride(unittest.TestCase):
         # ordering fails here rather than as a confusing failure elsewhere.
         self.assertEqual(handler.ALERT_SEVERITIES, {"HIGH", "CRITICAL"})
         self.assertEqual(handler.lambda_handler(event(finding("MEDIUM")), None)["alerted"], 0)
+
+    def test_notify_topic_arn_env_var_is_honoured(self):
+        import importlib
+
+        try:
+            with patch.dict(
+                os.environ, {"NOTIFY_TOPIC_ARN": " arn:aws:sns:us-east-1:123456789012:topic "}
+            ):
+                importlib.reload(handler)
+                self.assertEqual(
+                    handler.NOTIFY_TOPIC_ARN, "arn:aws:sns:us-east-1:123456789012:topic"
+                )
+        finally:
+            importlib.reload(handler)
+
+        self.assertEqual(handler.NOTIFY_TOPIC_ARN, "")
 
 
 if __name__ == "__main__":

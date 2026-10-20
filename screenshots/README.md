@@ -131,7 +131,7 @@ before capturing these.
 | # | File | Where | Shows |
 | --- | --- | --- | --- |
 | 28 | `09-containment-eventbridge-rule.png` | EventBridge → Rules → `cloudsec-lab-s3-anonymous-access-containment` → Event pattern | The exact `Types` match — one finding type, not HIGH/CRITICAL generally |
-| 29 | `09-containment-iam-policy.png` | IAM → role for the containment Lambda → Permissions | `s3:GetBucketPublicAccessBlock` / `s3:PutBucketPublicAccessBlock` scoped to one bucket ARN, not a wildcard — corrected in [Incident 03](../incidents/incident-03-automated-containment.md); capture the post-fix policy, not the original typo'd one |
+| 29 | `09-containment-iam-policy.png` | IAM → role for the containment Lambda → Permissions | `s3:GetBucketPublicAccessBlock` / `s3:PutBucketPublicAccessBlock` scoped to one bucket ARN, not a wildcard — note "Bucket" in the action names, which is the real IAM action, not the boto3 client method name |
 | 30 | **`09-containment-log-contained.png`** | CloudWatch Logs → containment log group → the `Contain` scenario's `contained` line | **The structured log line proving the Lambda made the real API call. Single best image for this phase.** Account ID appears inside the bucket ARN — box it out. |
 | 31 | `09-containment-log-skipped.png` | Same log group → a `skipped_resource_not_allowlisted` line from the `WrongResource` scenario | Proof the allowlist check isn't bypassable by finding type alone |
 | 32 | `09-s3-public-access-block-restored.png` | S3 → the INC-02 bucket → Permissions, immediately after the `Contain` run | All four Block Public Access settings back to **On**, set by the Lambda, not by hand |

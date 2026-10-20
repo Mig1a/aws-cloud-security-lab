@@ -78,3 +78,20 @@ output "containment_self_test_command" {
   description = "Flip the allow-listed bucket's Block Public Access off, import a synthetic matching finding, and verify the Lambda restores it."
   value       = "./detections/test-automated-containment.ps1"
 }
+
+# --- Extension: standards-based containment + SNS notification --------------
+
+output "containable_security_control_ids" {
+  description = "Compliance.SecurityControlId values (e.g. S3.1) the containment Lambda also acts on, alongside the GuardDuty-sourced Types values above. Empty means the standards-sourced EventBridge rule does not exist at all - see containment_standards_eventbridge.tf."
+  value       = var.containable_security_control_ids
+}
+
+output "security_alerts_topic_arn" {
+  description = "SNS topic the containment Lambda publishes to on any actionable outcome (contained, would_contain_but_disabled, contain_failed, examine_failed)."
+  value       = aws_sns_topic.security_alerts.arn
+}
+
+output "sns_subscription_arn" {
+  description = "Reads 'PendingConfirmation' until the link in the confirmation email is clicked - no notification is delivered until then."
+  value       = aws_sns_topic_subscription.email.arn
+}

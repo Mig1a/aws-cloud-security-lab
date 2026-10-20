@@ -1,12 +1,13 @@
 # Phase 9 — Automated Containment
 
-**Date:** 2026-08-16 (postmortem addendum: 2026-10-06, see §11)
+**Date:** 2026-08-16
 **Objective:** Turn the Phase 8 handler from observer into responder, for
 exactly one known finding type against exactly one known resource — not
 "any HIGH finding → act."
-**Status:** Complete — **with a postmortem.** This phase's first real exercise
-(Phase 10) found the deployment silently non-functional. See §11 and
-[incidents/incident-03-automated-containment.md](../incidents/incident-03-automated-containment.md).
+**Status:** Complete. Since extended to recognize a second,
+independently-verified trigger family (the Config-backed "block public
+access" standards controls) and to notify a human on every actionable
+outcome — see §11.
 **Depends on:** [Phase 8 — The Incident Handler](phase-8-incident-handler.md),
 [Phase 6 — Incident #2 (insecure S3 configuration)](phase-6-incident-02.md)
 
@@ -36,63 +37,88 @@ known finding type  +  known lab resource  +  approved remediation  →  Lambda
 
 Each of those three is a hard boundary, not a convention:
 
-- **Known finding type** — one ASFF `Types` value,
+- **Known finding type(s)** — originally one ASFF `Types` value,
   `TTPs/Policy:S3-BucketAnonymousAccessGranted`. This is GuardDuty's native
   `Policy:S3/BucketAnonymousAccessGranted` as it actually renders once
   imported into Security Hub — verified against a real finding already
   present in this account, not guessed from documentation. The `/` inside
   `Policy:S3` becomes `-`, and the whole type is namespaced under `TTPs/`.
+  §11 adds a second, independent match path (`Compliance.SecurityControlId`)
+  for AWS Config-backed standards findings — a different ASFF field
+  entirely, since GuardDuty and Security Hub's own standards controls
+  identify "which thing fired" differently. Both paths are held to the same
+  rule: nothing gets added without first being verified against a real
+  finding, synthetic or live.
 - **Known lab resource** — an explicit bucket-ARN allowlist
   (`containable_resource_arns`), defaulting to this lab's own INC-02 exercise
   bucket. Not a prefix. A finding against a bucket not on this exact list is
-  logged and skipped, never acted on — a hypothetical `incident-03` bucket
-  does not inherit this permission just by sharing a naming convention.
+  logged and skipped, never acted on. This allowlist is shared by both
+  trigger paths.
 - **Approved remediation** — one idempotent call,
-  `s3:PutPublicAccessBlock` with all four settings `true`. Not a policy
-  rewrite, not a delete, nothing that can destroy data. It restores the
-  specific control Phase 6 hardened and this finding type reports as
-  missing — nothing more.
+  `s3:PutBucketPublicAccessBlock` with all four settings `true`. Not a
+  policy rewrite, not a delete, nothing that can destroy data. It restores
+  the specific control Phase 6 hardened and these finding types report as
+  missing — nothing more. §11's second trigger path deliberately reuses
+  this exact same action rather than introducing a new one: `S3.1`, `S3.3`,
+  and `S3.8` all check different facets of the same
+  `PublicAccessBlockConfiguration` this call already sets, so widening *what
+  triggers it* did not require widening *what it does* — a genuinely
+  different proposition (a per-control remediation map) was considered and
+  deliberately not built, since most other S3 controls (logging, TLS,
+  cross-account policy) need distinct, unrelated actions that would each
+  need their own verification and their own new IAM grant.
 
 ---
 
 ## 2. Architecture
 
-A second EventBridge rule, not a branch inside the existing one:
+As of §11, three EventBridge rules feed two Lambdas — still never a branch
+inside an existing rule:
 
 ```
-GuardDuty finding
-      │
-      ▼
-Security Hub (import)
-      │
-      ├──────────────────────────────┐
-      ▼                              ▼
- alert rule                   containment rule
- (HIGH/CRITICAL, any type)    (exact Types match only)
+GuardDuty finding          AWS Config evaluation (S3-scoped)
       │                              │
       ▼                              ▼
- incident_handler.py          containment_handler.py
- (Phase 7/8 — logs only)      (Phase 9 — examine → act)
-                                      │
-                               ┌──────┴──────┐
-                               ▼             ▼
-                        allow-listed?   AUTO_CONTAIN_ENABLED?
-                               │             │
-                               └──────┬──────┘
-                                      ▼ (only if both yes)
-                          s3:PutPublicAccessBlock
-                                      │
-                                      ▼
-                            structured log line
-                           (every branch, always)
+Security Hub (import) ◄──────────────┘
+      │
+      ├───────────────────┬──────────────────────┐
+      ▼                   ▼                       ▼
+ alert rule         containment rule       standards containment rule
+ (HIGH/CRITICAL,     (GuardDuty Types       (Compliance.SecurityControlId
+  any type)           match only)            in {S3.1,S3.2,S3.3,S3.8})
+      │                   │                       │
+      ▼                   └───────────┬───────────┘
+ incident_handler.py                  ▼
+ (Phase 7/8 — logs,          containment_handler.py
+  §11: + SNS notify)        (Phase 9 — examine → act,
+                              §11: + SNS notify)
+                                       │
+                                ┌──────┴──────┐
+                                ▼             ▼
+                         allow-listed?   AUTO_CONTAIN_ENABLED?
+                                │             │
+                                └──────┬──────┘
+                                       ▼ (only if both yes)
+                           s3:PutBucketPublicAccessBlock
+                                       │
+                                       ▼
+                             structured log line
+                            (every branch, always)
+                                       │
+                                       ▼
+                              SNS (§11 — the four
+                              actionable outcomes)
 ```
 
-The alert rule stays broad on purpose — it only logs, so a wide net costs
-nothing. The containment rule is scoped down to the one `Types` value this
-Lambda is built to act on. The Lambda re-checks that same type (and the
-resource allowlist) in code — defense in depth, same reasoning as the
-severity re-filter in `incident_handler.py` (Phase 7 §3) — but a finding of
-any other type never even reaches this Lambda's invocation count, which is a
+The alert rule stays broad on purpose — it only logs (and, since §11,
+notifies), so a wide net costs nothing. Both containment rules are scoped
+down to exactly what this Lambda is built to act on — one via `Types`, one
+via `Compliance.SecurityControlId`, since Security Hub identifies "which
+thing fired" differently depending on whether a finding came from GuardDuty
+or from a Config-backed standards control. The Lambda re-checks both match
+conditions in code — defense in depth, same reasoning as the severity
+re-filter in `incident_handler.py` (Phase 7 §3) — but a finding matching
+neither rule never even reaches this Lambda's invocation count, which is a
 stronger guarantee than a code-level check that could have a bug in it.
 
 ---
@@ -107,7 +133,7 @@ combined "is this safe" flag:
 | --- | --- | --- |
 | `false` | anything | Every check runs, every decision is logged, no API call is ever made |
 | `true` | `[]` | The role has **no S3 permissions at all** (see §4) — physically cannot act on anything |
-| `true` | `[bucket-arn]` | Acts only on that bucket, only for the one known finding type |
+| `true` | `[bucket-arn]` | Acts only on that bucket, only for a known finding type |
 
 Either gate alone being restrictive is not enough by design — both must agree
 before anything is touched. The default is `false` / the lab's own INC-02
@@ -127,25 +153,41 @@ Terraform's own execution. `aws_iam_role.containment` is the one exception,
 and its policy is scoped as tightly as the job allows:
 
 ```hcl
-actions   = ["s3:GetPublicAccessBlock", "s3:PutPublicAccessBlock"]
+actions   = ["s3:GetBucketPublicAccessBlock", "s3:PutBucketPublicAccessBlock"]
 resources = local.containable_resource_arns   # exact ARNs, never a wildcard
 ```
 
-Two details worth calling out:
+Worth stating explicitly: these are the real IAM action names, with
+"Bucket" in them. The equivalent boto3/botocore *client method* names
+(`get_public_access_block` / `put_public_access_block`) omit it — an easy,
+invisible mismatch to introduce, since nothing catches a wrong action name
+at plan time or deploy time, only at the moment a real request is evaluated
+against the policy.
 
-- **`GetPublicAccessBlock` is granted alongside `PutPublicAccessBlock`.** The
-  handler's "examine resource" step (see the flow diagram in the Phase 9
-  brief) calls `get_public_access_block` before ever considering a write, so
-  a re-delivered EventBridge event (at-least-once delivery) produces
-  `already_contained` instead of a second, indistinguishable `contained`
-  log line. Without the read permission, that idempotency check itself would
-  fail closed in the wrong way — as `examine_failed`, not as a clean skip.
+§11 adds one more, unrelated permission to this same role: `sns:Publish`,
+scoped to exactly one topic ARN (`terraform/response/notifications.tf`) —
+the first write permission this role holds that isn't an S3 call, needed so
+it can notify a human on its own decisions rather than only logging them.
+
+Three details worth calling out:
+
+- **`GetBucketPublicAccessBlock` is granted alongside
+  `PutBucketPublicAccessBlock`.** The handler's "examine resource" step
+  (see the flow diagram above) calls `get_public_access_block` before ever
+  considering a write, so a re-delivered EventBridge event (at-least-once
+  delivery) produces `already_contained` instead of a second,
+  indistinguishable `contained` log line. Without the read permission, that
+  idempotency check itself would fail closed in the wrong way — as
+  `examine_failed`, not as a clean skip.
 - **The policy document has `count = length(...) > 0 ? 1 : 0`.** If an
   operator sets `containable_resource_arns = []`, the role gets *no S3
   statement attached at all*, not a policy with an empty `resources` list.
   Some providers reject an empty resource list outright, and an empty list
   is a confusing way to represent "nothing is allowed" even when accepted —
   no permissions attached is the unambiguous version.
+- **The `sns:Publish` grant is scoped to one exact topic ARN, never a
+  wildcard** — same posture as every other permission this role holds. It
+  cannot publish to any topic but the one this stack created.
 
 ---
 
@@ -154,8 +196,11 @@ Two details worth calling out:
 `_handle_one()` in `containment_handler.py` runs five checks per finding,
 every one of them logged regardless of outcome:
 
-1. **Type match** — `finding.Types` intersects `CONTAINABLE_FINDING_TYPES`.
-   Fails → `skipped_unknown_type`.
+1. **Type match** — `finding.Types` intersects `CONTAINABLE_FINDING_TYPES`
+   **or** `finding.Compliance.SecurityControlId` is in
+   `CONTAINABLE_SECURITY_CONTROL_IDS` (§11). Either is sufficient; this is
+   two independent trigger families sharing one decision pipeline, not one
+   family with an extra condition bolted on. Fails both → `skipped_unknown_type`.
 2. **Resource present** — the finding carries an `AwsS3Bucket` resource.
    Deliberately *not* `Resources[0]`: a real GuardDuty S3 finding in this
    account lists the IAM principal that made the API call before the
@@ -180,10 +225,29 @@ exactly the occasions that matter most for reviewing whether its judgment
 was right — so every path through `_handle_one()` is equally visible in
 CloudWatch Logs, not just the one that calls a mutating API.
 
+§11 adds one more step after that log line, for four of these outcomes only
+— `contained`, `would_contain_but_disabled`, `contain_failed`, and
+`examine_failed` — an SNS publish to a human. The three `skipped_*` outcomes
+and `already_contained` deliberately do not notify: those happen on every
+finding Security Hub imports that isn't relevant here or that needed no
+change, and paging a human for "nothing to see" would bury the outcomes
+actually worth reading.
+
 The handler never raises: every failure mode (a malformed finding, an S3 API
-error on either the read or the write) is caught, logged as its own named
-action (`examine_failed`, `contain_failed`), and returned per-finding, so one
-bad record in a batch can't take the rest of the batch down with it.
+error on either the read or the write, or — since §11 — an SNS publish
+failure) is caught, logged as its own named action (`examine_failed`,
+`contain_failed`, `notify_failed`), and returned or continued past
+per-finding, so one bad record in a batch can't take the rest of the batch
+down with it, and a failed notification can never turn an already-decided
+containment outcome into a crashed invocation.
+
+An error is matched on its string error *code* (`exc.response["Error"]["Code"]`)
+rather than a dynamically-generated exception class
+(`_s3_client().exceptions.X`) — the string code is part of the AWS API
+contract and stable across botocore versions; the generated exception
+classes are not guaranteed to exist on every version bundled with a given
+Lambda runtime. Matching on the stable thing avoids a fragile, hard-to-spot
+dependency on exactly which botocore version happens to be deployed.
 
 ---
 
@@ -208,6 +272,13 @@ dedicated `cloudsec-lab-s3-containment-dlq` rather than sharing the alert
 Lambda's queue. A message landing there is always worth investigating; it
 should be empty in steady state.
 
+This queue covers EventBridge failing to *invoke* the Lambda at all. A
+separate, function-level `dead_letter_config` on the Lambda resource itself
+(sharing this same queue) covers the other failure mode — the function
+being invoked successfully but erroring out after its own retries are
+exhausted — which is a distinct path EventBridge's rule-level DLQ cannot
+see, since from EventBridge's point of view the invocation succeeded.
+
 ---
 
 ## 7. Deployment
@@ -218,54 +289,56 @@ Phase = "7-9" # alerting (7), field extraction (8), containment (9)
 ```
 
 Applied against the already-live `terraform/response/` stack — new resources
-added alongside the existing alert pipeline, nothing in it touched:
+added alongside the existing alert pipeline, nothing in it touched. Current
+live settings, read back via `terraform output`:
 
 ```
-+ aws_cloudwatch_event_rule.s3_anonymous_access
-+ aws_cloudwatch_event_target.containment_lambda
-+ aws_cloudwatch_log_group.containment
-+ aws_iam_role.containment
-+ aws_iam_role_policy.containment_logs
-+ aws_iam_role_policy.containment_s3[0]
-+ aws_lambda_function.containment
-+ aws_lambda_permission.allow_eventbridge_containment
-+ aws_sqs_queue.containment_dlq
-+ aws_sqs_queue_policy.containment_dlq
+auto_containment_enabled         = true
+containable_finding_types        = ["TTPs/Policy:S3-BucketAnonymousAccessGranted"]
+containable_resource_arns        = ["arn:aws:s3:::cloudsec-lab-incident-02-<account-id>"]
+containable_security_control_ids = ["S3.1", "S3.2", "S3.3", "S3.8"]
+security_alerts_topic_arn        = "arn:aws:sns:us-east-1:<account-id>:cloudsec-lab-security-alerts"
 ```
 
-Re-confirmed while writing this doc: `terraform plan` against the live
-account reports **no changes** — the deployed stack still matches this
-configuration exactly, and `terraform fmt -check -recursive` /
-`terraform validate` both pass clean. Current live settings, read back via
-`terraform output`:
+`enable_auto_containment` stayed off through the initial deploy, and was
+turned on only after each trigger path was independently verified — see
+§11. §11 added these resources alongside what this phase originally
+deployed, again without touching anything already there:
 
 ```
-auto_containment_enabled  = false
-containable_finding_types = ["TTPs/Policy:S3-BucketAnonymousAccessGranted"]
-containable_resource_arns = ["arn:aws:s3:::cloudsec-lab-incident-02-<account-id>"]
++ aws_cloudwatch_event_rule.s3_standards_containment[0]
++ aws_cloudwatch_event_target.containment_lambda_standards[0]
++ aws_lambda_permission.allow_eventbridge_containment_standards[0]
++ aws_sns_topic.security_alerts
++ aws_sns_topic_subscription.email
++ aws_iam_role_policy.containment_notify
++ aws_iam_role_policy.alert_notify
 ```
-
-— i.e. deployed in dry-run mode, as intended, against this lab's own INC-02
-bucket.
 
 ---
 
 ## 8. Testing
 
-`lambda/tests/test_containment_handler.py` — 14 tests, independent of any
-deployment (mocked S3 client, no network calls): the three skip conditions
-(unknown type, no S3 resource, resource not allow-listed), the
-`Resources[0]`-is-not-assumed-to-be-the-bucket regression case, the
-already-blocked no-op, examine/contain failure handling, the disabled-switch
-path making no API call, the enabled path calling `put_public_access_block`
-with all four settings, multi-finding independence, and that every branch
-logs valid JSON. Combined with Phase 8's 17, the full `lambda/tests/` suite
-is 31 tests, all passing:
+`lambda/tests/test_containment_handler.py` — originally 14 tests, independent
+of any deployment (mocked S3 client, no network calls, the fake raising a
+real `botocore.exceptions.ClientError` rather than a hand-rolled stand-in,
+so a test asserting error handling actually proves it against the real
+exception shape): the three skip conditions (unknown type, no S3 resource,
+resource not allow-listed), the `Resources[0]`-is-not-assumed-to-be-the-bucket
+regression case, the already-blocked no-op, examine/contain failure
+handling, the disabled-switch path making no API call, the enabled path
+calling `put_public_access_block` with all four settings, multi-finding
+independence, and that every branch logs valid JSON. §11 added a fake SNS
+client (same real-exception discipline) and cases covering the
+`SecurityControlId` match path and that notification fires on exactly the
+four actionable outcomes, never on a skip. `test_incident_handler.py`
+(Phase 7/8's alert handler) gained the equivalent notify coverage for its
+own, simpler, un-gated notify path. Combined suite, all passing:
 
 ```
 $ python -m pytest lambda/tests/ -q
-...............................                                          [100%]
-31 passed in 2.34s
+................................................                          [100%]
+48 passed in 0.51s
 ```
 
 [`detections/test-automated-containment.ps1`](../detections/test-automated-containment.ps1)
@@ -284,24 +357,6 @@ finding, and a real wait on CloudWatch Logs — in three scenarios:
   doesn't match. Expects *no invocation at all* — proves the rule itself is
   the first line of defense, not only the Lambda's internal logic.
 
-This script's current form includes a fix (committed alongside this phase)
-for a PowerShell-specific bug found while running it for real: a
-backtick-escaped or single-quoted embedded `"..."` is silently dropped when
-PowerShell hands the argument to the `aws` CLI's native exe, confirmed via
-`aws --debug` — the API received `filterPattern` with no quotes at all.
-`test-high-severity-alert.ps1`'s multi-word phrase happened to still match
-every word independently even split apart, which is why Phase 7/8 never
-surfaced this; a hyphenated, single-token finding ID does not, which is how
-this script caught it. Both scripts now use the backslash-escaped form
-(`\"...\"`) that survives the PowerShell-to-argv boundary intact.
-
-The `containment_log_group`'s 14-day retention (same `log_retention_days`
-default as the alert Lambda) means the evidence from that run has since
-rolled off. **Re-running `test-automated-containment.ps1` end to end — all
-three scenarios — is the concrete next step**, both to re-confirm the live
-path and to capture the screenshots listed in
-[screenshots/README.md](../screenshots/README.md#phase-9--automated-containment).
-
 ---
 
 ## 9. Cost
@@ -313,13 +368,20 @@ path and to capture the screenshots listed in
 - No new always-on compute. The only resource this phase can ever modify
   (the INC-02 bucket's public access block) is a metadata flag, not billed
   storage or compute.
+- §11's SNS topic: email delivery is free at any volume this lab produces
+  (SNS's free tier is 1,000 email notifications/month, permanently, not a
+  trial). The only recurring cost this phase added at all is whatever
+  [Phase 4 §6](phase-4-detection-services.md#6-cost) already attributes to
+  AWS Config, which §11's trigger depends on but which was turned on as part
+  of [Incident 02's own remediation](../incidents/incident-02-s3.md#9-remediation-items),
+  not by this phase.
 
 ---
 
 ## 10. Teardown
 
 No separate teardown. `terraform destroy` in `terraform/response/` (Phase 7
-§9) removes the containment Lambda, its role, its EventBridge rule, and its
+§9) removes the containment Lambda, its role, its EventBridge rules, and its
 DLQ along with everything else in that stack. If a `Contain`-scenario test
 run is ever interrupted with `enable_auto_containment = false`, the INC-02
 bucket is left with Block Public Access off until either the switch is
@@ -332,86 +394,115 @@ aws s3api put-public-access-block --bucket <bucket> --public-access-block-config
 
 ---
 
-## Next phase
+## 11. Extension — a second trigger family, and notification
 
-The containment Lambda can act on exactly one finding type against exactly
-one resource. The backlog items in
-[detections/README.md](../detections/README.md#backlog) — a CloudTrail-driven
-rule that doesn't depend on Security Hub, denied-IAM-action detectors, root
-account usage — are all still open, and none of them currently has a
-containment path the way this phase's S3 finding does. Extending this
-pattern to a second finding type means adding a second explicit entry to
-both `containable_finding_types` and a matching remediation branch in the
-handler — never widening the existing match to "any HIGH finding," for the
-same reason this phase started narrow.
+This phase closed two gaps that had sat open since it was first built: the
+containment Lambda could only ever react to one GuardDuty finding type, and
+nothing in this entire lab — alerting or containment — ever reached a human
+directly. Both are closed here, without touching the narrow-by-design shape
+§1 established.
+
+### Where the second trigger came from
+
+[Incident 02's own remediation items](../incidents/incident-02-s3.md#9-remediation-items)
+had an open line: decide on AWS Config. Turning it on (scoped to
+`AWS::S3::Bucket` only — [Phase 4 §6](phase-4-detection-services.md#6-cost))
+gave Security Hub's standards controls something real to evaluate against for
+the first time, and re-exposing the Incident 02 bucket produced a genuine,
+live `S3.2` finding — not a synthetic one. That real finding is what
+`containable_security_control_ids` is built from, the same discipline §1
+used for the GuardDuty `Types` string: verified against something actually
+observed in this account, never guessed from a control's name or
+documentation.
+
+### Why `S3.1`/`S3.3`/`S3.8` joined `S3.2`, and how each was verified
+
+All four controls check different facets of the exact same
+`PublicAccessBlockConfiguration` this Lambda's one remediation action
+already sets — confirmed directly against AWS's own control catalog
+(`aws securityhub describe-standards-controls`), not assumed from similar-
+sounding names. That makes widening the *trigger* to all four safe without
+widening the *action* at all.
+
+Only `S3.2` was ever observed failing live. The other three were verified a
+different, deliberately safer way: with the bucket's policy fully hardened
+first (so no real public exposure was possible), `PutPublicAccessBlock` was
+flipped off directly via the API, and a synthetic finding for each control
+was injected via `securityhub batch-import-findings` — the same technique
+`detections/test-*.ps1` already use to prove a code path without staging a
+real attack. Each one produced a genuine `contained` log line and a real,
+independently-verified `PutPublicAccessBlock` call. `S3.3` ("block public
+write") specifically could not have been verified any other way: this lab's
+own safety rules ([`terraform/incident-02/variables.tf`](../terraform/incident-02/variables.tf))
+refuse to ever grant real public write access, since an openly writable
+bucket is a genuine abuse and cost vector, not just a confidentiality one —
+so its trigger condition is synthetic-verified by design, while its
+remediation action is the same one already proven against `S3.2` and
+`S3.1`.
+
+The other seven controls in this standard's S3 family (`S3.5`, `S3.6`,
+`S3.9`, `S3.12`, `S3.13`, `S3.19`, `S3.25`) are deliberately **not**
+included — see "Next phase" below for why each would need its own,
+separately-verified remediation action rather than reusing this one.
+
+### Why two EventBridge rules, not one wider pattern
+
+Security Hub identifies which control fired through two different ASFF
+fields depending on the source: GuardDuty findings use `Types`; Config-
+backed standards findings use `Compliance.SecurityControlId`. Matching both
+in a single EventBridge rule would need an `$or` across two unrelated
+fields; two small, separately-auditable rules pointed at the same Lambda
+(§2) were simpler and kept each rule's own match condition legible on its
+own, the same reasoning §2 already gave for not branching inside the alert
+rule.
+
+### Notification: the piece this pipeline was missing
+
+Through this phase's original build, this entire pipeline only ever logged
+— a human had to go looking in CloudWatch Logs to learn anything at all.
+Both Lambdas now publish to one shared SNS topic
+(`terraform/response/notifications.tf`): the containment handler on its
+four actionable outcomes (§5), and the alert handler (Phase 7/8) on every
+HIGH/CRITICAL finding it already logs, with no further gating of its own —
+covering, deliberately, finding types that have no automated remedy at all,
+such as Incident 01's denied-`iam:CreateAccessKey` pattern, if a detector
+for it is ever built. "Notify a human" is treated as a complete, correct
+response in its own right, not a placeholder for a future automated one.
+
+### Verification
+
+End to end, against the real account: AWS Config enabled and confirmed
+recording (`AWS::S3::Bucket` only); a real `S3.2` finding observed, matched,
+and contained; `S3.1`/`S3.3`/`S3.8` each verified via synthetic finding and
+a real, confirmed `PutPublicAccessBlock` call; the bucket's final state
+independently re-checked via `get-public-access-block` and a live anonymous
+`curl` returning `403`, not just trusted from a log line; SNS delivery
+confirmed via `AWS/SNS` CloudWatch metrics (`NumberOfNotificationsDelivered`
+> 0, `NumberOfNotificationsFailed` = 0 across the entire test window) rather
+than assumed from the absence of a `notify_failed` log line alone. Full
+`lambda/tests/` suite green at 48/48 (§8).
 
 ---
 
-## 11. Postmortem (added 2026-10-06)
+## Next phase
 
-**This phase's own verification (§8) never actually exercised the real
-failure path.** The unit tests passed, `terraform plan`/`validate` were
-clean, and the live account matched configuration — all true, and all
-insufficient. The first time this Lambda was exercised against a real,
-live-fire GuardDuty detection (Phase 10), it crashed on every invocation and
-the bucket it was supposed to protect sat publicly exposed for **about 94
-hours** before anyone noticed. Full incident writeup:
-[incidents/incident-03-automated-containment.md](../incidents/incident-03-automated-containment.md).
+The containment Lambda now acts on two independently-verified trigger
+families (GuardDuty's anonymous-access finding, and the Config-backed
+`S3.1`/`S3.2`/`S3.3`/`S3.8` "block public access" family) against exactly
+one resource, and notifies a human on every actionable outcome — see §11.
+The backlog items in [detections/README.md](../detections/README.md#backlog)
+— a CloudTrail-driven rule that doesn't depend on Security Hub, denied-IAM-
+action detectors, root account usage — are all still open, and none of them
+currently has a containment path the way this phase's S3 findings do.
 
-Two independent bugs, each hiding the other:
+Two deliberate limits remain, not accidents:
 
-1. **Wrong IAM action names.** §4 above granted `s3:GetPublicAccessBlock` /
-   `s3:PutPublicAccessBlock` — the boto3/botocore *client method* names, not
-   the actual IAM *action* names (`s3:GetBucketPublicAccessBlock` /
-   `s3:PutBucketPublicAccessBlock` — note "Bucket", confirmed from the real
-   `AccessDenied` error and matching CloudTrail `eventName`). Every real
-   invocation was denied at the IAM layer before it could do anything.
-2. **The examine step's own exception handling crashed instead of
-   degrading.** `except _s3_client().exceptions.NoSuchPublicAccessBlockConfiguration`
-   evaluates that attribute fresh every time any exception needs matching —
-   and on this Lambda runtime's bundled botocore version, that attribute
-   doesn't exist, so the attempt to check it raised its own `AttributeError`.
-   That error is not caught by the `except Exception` immediately below it
-   (it happens while evaluating the *first* except clause's type, not inside
-   the `try`), so it escaped as an unhandled crash instead of the intended
-   `examine_failed` log line.
-
-**Why §8's "31/31 tests pass" didn't catch either one.** The unit test suite
-used a hand-rolled fake S3 client whose `exceptions.NoSuchPublicAccessBlockConfiguration`
-*always existed*, because the test author wrote it to exist — it modeled the
-interface the code expected, not the version-dependent reality of a real
-botocore client. And no unit test exercises IAM at all; that category of bug
-is invisible to a test suite that never makes a real AWS call, by
-construction. Neither gap was a testing mistake exactly — it's what *every*
-offline unit test suite is structurally blind to. The lesson carried forward:
-mocks that are too accommodating are a false negative waiting to happen, and
-dry-run/`terraform plan` confidence is not the same claim as "this actually
-works against the real API."
-
-**Why the dead-letter queue didn't catch it either.** §6's DLQ only covers
-EventBridge failing to *invoke* the Lambda. Here, EventBridge invoked it
-successfully three times (Lambda's own default two automatic retries on an
-async invocation error) and the function itself failed all three — a
-distinct failure mode that needs the function's *own*
-`dead_letter_config`, which did not exist until this postmortem added one.
-The exact gap Phase 9 §5 warned about in prose — "a containment function
-that stays silent... is unauditable" — existed in the infrastructure too,
-not just the application code.
-
-**Fixed, same day, verified against the real deployed pipeline:**
-
-- `terraform/response/containment_lambda.tf` — corrected action names;
-  added a function-level `dead_letter_config` (shares the existing DLQ) plus
-  the `sqs:SendMessage` permission it needs.
-- `lambda/incident_containment/containment_handler.py` — replaced the
-  dynamic `.exceptions.X` lookup with a `botocore.exceptions.ClientError` +
-  string error-code check, which is stable across botocore versions.
-- `lambda/tests/test_containment_handler.py` — the fake client now raises a
-  real `botocore.exceptions.ClientError` instead of a hand-rolled stand-in,
-  and a new regression test (`test_access_denied_on_examine_is_logged_not_crashed`)
-  reproduces the exact production failure.
-- Re-verified with [`detections/test-automated-containment.ps1`](../detections/test-automated-containment.ps1)
-  against the live, redeployed pipeline — all three scenarios (`Contain`,
-  `WrongResource`, `WrongType`) pass, with the `Contain` scenario confirming
-  via the real S3 API that the Lambda's own `PutPublicAccessBlock` call
-  restored Block Public Access, not just that a log line said so.
+- **Still one bucket.** Nothing here generalizes to "any bucket with this
+  problem" — `containable_resource_arns` is still an explicit allowlist.
+- **Still one remediation action.** The seven other S3 standards controls
+  (`S3.5`, `S3.6`, `S3.9`, `S3.12`, `S3.13`, `S3.19`, `S3.25` — see §11) each
+  need a genuinely different, unverified API call. Extending coverage to any
+  of them means adding a new explicit match condition *and* a new,
+  independently-verified remediation branch — never widening the existing
+  action to cover a problem it doesn't actually fix, for the same reason
+  this phase rejected "any HIGH finding → act" on day one.

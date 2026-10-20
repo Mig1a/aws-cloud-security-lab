@@ -125,7 +125,7 @@ variable "containable_resource_arns" {
     must never be committed to this repo's Terraform. Override to point
     elsewhere, or to list more than one bucket, in terraform.tfvars.
 
-    NOT a prefix match, anywhere in this stack. A future incident-03 bucket
+    NOT a prefix match, anywhere in this stack. A future exercise bucket
     does not inherit this permission just by sharing a naming convention -
     it has to be added here deliberately. Empty list = nothing is ever
     contained, regardless of enable_auto_containment; this is the second,
@@ -133,4 +133,43 @@ variable "containable_resource_arns" {
   EOT
   type        = list(string)
   default     = []
+}
+
+# --- Extension: standards-based containment + SNS notification --------------
+
+variable "containable_security_control_ids" {
+  description = <<-EOT
+    Compliance.SecurityControlId values (e.g. "S3.1") the containment Lambda
+    also acts on, alongside containable_finding_types above.
+
+    These findings come from AWS Config-backed Security Hub standards
+    controls (terraform/detection/config.tf must have enable_config = true,
+    or nothing ever evaluates these controls to begin with), not from
+    GuardDuty - a different ASFF field identifies which control fired
+    (Compliance.SecurityControlId, not Types), which is why this is a
+    separate variable and a separate EventBridge rule
+    (containment_standards_eventbridge.tf) rather than an added value in
+    containable_finding_types.
+
+    Default is empty on purpose: do not guess this value. Enable Config,
+    let a real finding land in Security Hub, read its actual
+    Compliance.SecurityControlId, and set it here - the same discipline
+    Phase 9 used to verify containable_finding_types against a real
+    GuardDuty finding rather than documentation.
+
+    Still subject to containable_resource_arns above - the resource
+    allowlist is shared by both containment paths.
+  EOT
+  type        = list(string)
+  default     = []
+}
+
+variable "notify_email" {
+  description = "Email address the containment Lambda's SNS topic delivers to. Requires a one-time confirmation click in that inbox after apply before anything is actually delivered."
+  type        = string
+
+  validation {
+    condition     = can(regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", var.notify_email))
+    error_message = "notify_email must look like a valid email address."
+  }
 }

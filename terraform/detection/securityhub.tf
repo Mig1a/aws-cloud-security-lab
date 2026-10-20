@@ -4,14 +4,15 @@
 # ingested beyond the monthly free allowance.
 #
 # IMPORTANT DEPENDENCY: most controls in the standards below are evaluated by
-# AWS Config rules under the hood. AWS Config is NOT enabled by this stack and
-# has no free tier - it bills per configuration item recorded. Without it, a
-# large share of controls report "No data" rather than pass or fail.
-#
-# That is a deliberate choice: Config on an account with active Terraform
-# apply/destroy cycles records an item for every resource change and is the
-# most likely source of an unexpected bill in this lab. Enable it consciously,
-# after deciding the budget can absorb it.
+# AWS Config rules under the hood, not by Security Hub itself - Security Hub
+# only aggregates findings that something else (Config, for these controls;
+# GuardDuty, for behavioral ones) already produced and handed to it. See
+# config.tf: Config is OFF by default (var.enable_config) and has no free
+# tier - it bills per configuration item recorded. Without it, a large share
+# of controls report "No data" rather than pass or fail, confirmed directly
+# in incidents/incident-02-s3.md (zero findings against a genuinely public
+# bucket) and closed out in that same report's addendum once Config was
+# turned on, scoped to AWS::S3::Bucket only.
 #
 # What still works without Config: GuardDuty findings flowing into Security Hub,
 # the Security Hub finding format itself, and controls evaluated directly
